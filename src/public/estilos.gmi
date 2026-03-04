@@ -1,0 +1,33 @@
+# Demostración de Estilos ANSI
+
+Este archivo demuestra los helpers de Handlebars para estilizar texto.
+
+## Estilos individuales
+
+{{#bold}}Este texto está en negritas{{/bold}}
+
+{{#italic}}Este texto está en cursiva{{/italic}}
+
+{{#underline}}Este texto está subrayado{{/underline}}
+
+{{#strikethrough}}Este texto está tachado{{/strikethrough}}
+
+{{#dim}}Este texto está atenuado (dim){{/dim}}
+
+{{#normal}}Este texto es normal (sin estilos){{/normal}}
+
+## Estilos combinados
+
+{{#style "bold underline"}}Texto en negritas y subrayado{{/style}}
+
+{{#style "italic dim"}}Texto en cursiva y atenuado{{/style}}
+
+{{#style "bold italic underline"}}Texto con múltiples estilos{{/style}}
+
+## Información dinámica
+
+Fecha actual: {{#bold}}{{date}}{{/bold}}
+Año: {{#underline}}{{year}}{{/underline}}
+
+=> / Volver al inicio
+=> /acerca Acerca del servidor

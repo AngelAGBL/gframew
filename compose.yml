@@ -4,8 +4,6 @@ services:
       context: .
     image: gfw
     volumes:
-    - ./server.crt:/home/bun/app/server.crt:ro,z
-    - ./server.key:/home/bun/app/server.key:ro,z
     - ./src:/home/bun/app/src:z
     ports:
     - 1965:1965

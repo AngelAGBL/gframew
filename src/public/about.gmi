@@ -1,4 +1,0 @@
-# Acerca de
-Este es un servidor Gemini construido con Node.js y TypeScript.
-
-=> / Volver al inicio

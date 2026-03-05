@@ -1,8 +1,0 @@
-# Documentación
-Bienvenido a la sección de documentación.
-
-## Secciones
-=> /docs/getting-started.gmi Primeros pasos
-=> /docs/api.gmi Referencia API
-
-=> / Volver al inicio

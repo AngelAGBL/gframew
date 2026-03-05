@@ -24,7 +24,7 @@ export async function serveStaticFile(socket: TLSSocket, filePath: string): Prom
   
   // Construir ruta absoluta desde el directorio del archivo actual
   const baseDir = path.resolve(path.dirname(new URL(import.meta.url).pathname));
-  let fullPath = path.resolve(baseDir, "../" + config.publicDir, safePath);
+  let fullPath = path.resolve(baseDir, "../../" + config.publicDir, safePath);
   const originalPath = fullPath;
 
   // If file doesn't exist, try with .hbs extension

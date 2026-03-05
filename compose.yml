@@ -2,8 +2,8 @@ services:
   gemfw:
     build:
       context: .
-    image: gfw
+    image: gframew
     volumes:
-    - ./src:/home/bun/app/src:z
+    - ./public:/home/bun/app/public:z
     ports:
     - 1965:1965

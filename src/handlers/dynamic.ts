@@ -22,14 +22,14 @@ export async function serveDynamicRoute(socket: TLSSocket, pathname: string): Pr
     safePath = path.join(safePath, 'index.ts');
   }
 
-  if (!safePath.endsWith('.ts') || !safePath.endsWith('.js')) return false;
+  if (!(safePath.endsWith('.ts') || safePath.endsWith('.js'))) return false;
 
   // Remove leading slash if present
   if (safePath.startsWith('/')) safePath = safePath.slice(1);
   
   // Construir ruta absoluta desde el directorio del archivo actual
   const baseDir = path.resolve(path.dirname(new URL(import.meta.url).pathname));
-  const routesDir = path.resolve(baseDir, "../" + config.publicDir);
+  const routesDir = path.resolve(baseDir, "../../" + config.publicDir);
   
   let routeFile: string | null = null;
   const testPath = path.resolve(routesDir, safePath);

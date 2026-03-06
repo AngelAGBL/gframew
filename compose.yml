@@ -21,6 +21,8 @@ services:
       LANGUAGE: en
     volumes:
       - ./public:/home/bun/app/public:z
+      - ./server.crt:/home/bun/app/server.crt:z
+      - ./server.key:/home/bun/app/server.key:z
     ports:
       - 1965:1965
 

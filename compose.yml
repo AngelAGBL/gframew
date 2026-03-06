@@ -8,7 +8,7 @@ services:
     volumes:
       - ./mongo:/data/db:z
 
-  gemfw:
+  gframew:
     build:
       context: .
     image: gframew
@@ -17,8 +17,8 @@ services:
     depends_on:
       - mongo
     environment:
-      MONGO_URL: mongodb://mongo:27017
-      MONGO_DB: gemini_comments
+      DOMAINS: localhost
+      LANGUAGE: en
     volumes:
       - ./public:/home/bun/app/public:z
     ports:

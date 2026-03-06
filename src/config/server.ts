@@ -1,6 +1,6 @@
 export const config = {
-  allowedDomains: ['localhost', 'example.com'],
+  allowedDomains: process.env.DOMAINS ? process.env.DOMAINS.split(',').map(d => d.trim()) : ['localhost'],
   publicDir: process.env.PUBLIC_DIR || 'public',
   port: process.env.PORT || 1965,
-  lang: process.env.LANG || 'es'
+  lang: process.env.LANGUAGE || 'en'
 };

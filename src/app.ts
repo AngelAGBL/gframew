@@ -11,7 +11,9 @@ await database.connect();
 const server = tls.createServer(
   {
     key: fs.readFileSync('server.key'),
-    cert: fs.readFileSync('server.crt')
+    cert: fs.readFileSync('server.crt'),
+    requestCert: true,
+    rejectUnauthorized: false
   },
   (socket) => {
     socket.once('data', (data) => handleRequest(socket, data));

@@ -14,12 +14,31 @@ registerHandlebarsHelpers();
 
 function getClientCertificate(socket: TLSSocket): string | null {
   const cert = socket.getPeerCertificate();
-  logger.info(cert.toString());
-  if (cert && Object.keys(cert).length > 0) {
-    const cn = cert.subject?.CN;
-    if (cn) return Array.isArray(cn) ? cn[0] : cn;
-    return cert.fingerprint || 'anonymous';
+  
+  // Check if certificate exists and is not empty
+  if (!cert || Object.keys(cert).length === 0) {
+    logger.info('No client certificate provided');
+    return null;
   }
+  
+  logger.info(`Client certificate: ${JSON.stringify({
+    subject: cert.subject,
+    fingerprint: cert.fingerprint,
+    valid_from: cert.valid_from,
+    valid_to: cert.valid_to
+  })}`);
+  
+  // Try to get Common Name from subject
+  if (cert.subject?.CN) {
+    const cn = cert.subject.CN;
+    return Array.isArray(cn) ? cn[0] : cn;
+  }
+  
+  // Fallback to fingerprint
+  if (cert.fingerprint) {
+    return cert.fingerprint;
+  }
+  
   return null;
 }
 
@@ -48,11 +67,11 @@ export async function serveStaticFile(socket: TLSSocket, pathname: string, input
   // Handle comment functionality for .gmi files
   if (pathname.endsWith('.gmi') && input) {
     const fileContent = fs.readFileSync(fullPath, 'utf-8');
-    if (fileContent.includes('{{comments}}')) {
+    if (fileContent.includes('{{{comments}}}')) {
       const clientCert = getClientCertificate(socket);
       
-      // Handle comment submission (any query parameter that's not "comment")
-      if (input !== 'comment') {
+      // Handle comment submission (any query parameter that's not "input")
+      if (input !== 'input') {
         if (!clientCert) {
           socket.write('60 Certificate needed\r\n');
           socket.end();
@@ -63,14 +82,16 @@ export async function serveStaticFile(socket: TLSSocket, pathname: string, input
         const commentText = decodeURIComponent(input);
         await addComment(pathname, clientCert, commentText);
         
-        // Redirect to original file
-        socket.write(`30 ${pathname}\r\n`);
+        // Redirect to original file, removing index.gmi if present
+        let redirectPath = pathname;
+        if (redirectPath.endsWith('index.gmi')) redirectPath = redirectPath.slice(0, -9);
+        socket.write(`30 /${redirectPath}\r\n`);
         socket.end();
         return true;
       }
       
-      // Handle comment form request (?comment)
-      if (input === 'comment') {
+      // Handle comment form request (?input)
+      if (input === 'input') {
         if (!clientCert) {
           socket.write('60 Certificate needed\r\n');
           socket.end();

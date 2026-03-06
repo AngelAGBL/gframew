@@ -36,3 +36,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Personal Public Directory
 public/*
 !public/.gitkeep
+
+# MongoDB data (if running locally)
+mongo-data/
+
+# Old JSON comments file (replaced by MongoDB)
+comments.json

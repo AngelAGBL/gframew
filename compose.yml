@@ -1,9 +1,28 @@
 services:
+  mongo:
+    image: mongo
+    container_name: gframew-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: gemini_comments
+    volumes:
+      - ./mongo:/data/db
+
   gemfw:
     build:
       context: .
     image: gframew
+    container_name: gemini-server
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB: gemini_comments
     volumes:
-    - ./public:/home/bun/app/public:z
+      - ./public:/home/bun/app/public:z
     ports:
-    - 1965:1965
+      - 1965:1965
+
+volumes:
+  mongo-data:

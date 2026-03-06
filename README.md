@@ -10,25 +10,23 @@ A dead simple gemini server-side framework written in TypeScript with Bun, featu
 - 🎨 Built-in helpers: ansi and unicode styling
 - 🐳 Fully containerized with Docker Compose
 - 🔒 TLS/SSL support with client certificate authentication
+- 🛡️ Built-in security: DoS protection, request size limits, timeouts
 - ⚡ Fast and lightweight with Bun runtime
 
 ## Quick Start
 
 ### Using Docker Compose (Recommended)
 
-1. Clone the repository and start the services:
+Clone the repository and start the services:
 
 ```bash
 docker compose up -d
 ```
 
 This will start:
+
 - Gemini server on port 1965
 - MongoDB for comments storage
-
-2. Access your server at `gemini://localhost:1965`
-
-3. View logs:
 
 ```bash
 docker compose logs -f
@@ -36,27 +34,15 @@ docker compose logs -f
 
 ### Development
 
-1. Install dependencies:
+Run the compose file
 
 ```bash
-bun install
-```
-
-2. Start MongoDB:
-
-```bash
-docker run -d -p 27017:27017 --name mongo mongo:7
-```
-
-3. Run the development server:
-
-```bash
-bun run dev
+docker compose up --build -d
 ```
 
 ## Project Structure
 
-```
+```tree
 .
 ├── public/              # Static files and Gemini content
 │   ├── index.gmi       # Homepage
@@ -81,28 +67,26 @@ The framework includes a powerful comments system that works with client certifi
 
 ### Enable Comments on a Page
 
-Add the `{{comments}}` tag to any `.gmi` file:
+Add the `{{{comments}}}` tag to any `.gmi` file:
 
 ```gemini
 # My Page
 
 Content here...
 
-{{comments}}
+{{{comments}}}
 
-=> mypage.gmi?comment Write a comment
+=> ?input Write a comment
 ```
 
 ### How It Works
 
 1. **View comments**: Access `page.gmi` to see all comments
-2. **Comment form**: Access `page.gmi?comment`
+2. **Comment form**: Access `page.gmi?input`
    - Without certificate: Returns `60 Certificate needed`
-   - With certificate: Returns `10 Escribe tu comentario`
+   - With certificate: Returns `10 Write your comment`
 3. **Submit comment**: Access `page.gmi?your_comment_here`
    - Saves comment and redirects to original page
-
-See [COMENTARIOS.md](COMENTARIOS.md) for detailed documentation.
 
 ## Handlebars Helpers
 
@@ -112,7 +96,7 @@ See [COMENTARIOS.md](COMENTARIOS.md) for detailed documentation.
 - `{{unicode}}` - Unicode characters
 - `{{date}}` - Current ISO date
 - `{{year}}` - Current year
-- `{{comments}}` - Comments section (when enabled)
+- `{{{comments}}}` - Comments section (when enabled)
 
 ### Example
 
@@ -121,28 +105,11 @@ See [COMENTARIOS.md](COMENTARIOS.md) for detailed documentation.
 
 Current date: {{date}}
 
+{{ansi "bold italic f#ff3a3a b#111111"}}This text is on red{{ansi}}
+
+{{unicode "bold"}}This text is written with unicode bold characters{{unicode}}
+
 {{comments}}
-```
-
-## MongoDB Management
-
-Use the provided utility script:
-
-```bash
-# View statistics
-./scripts/mongo-utils.sh stats
-
-# Create backup
-./scripts/mongo-utils.sh backup
-
-# Restore from backup
-./scripts/mongo-utils.sh restore ./backup
-
-# Open MongoDB shell
-./scripts/mongo-utils.sh shell
-
-# Clean all comments
-./scripts/mongo-utils.sh clean
 ```
 
 ## Configuration
@@ -155,6 +122,7 @@ Use the provided utility script:
 ### Docker Compose
 
 The `compose.yml` file defines:
+
 - MongoDB service with persistent volume
 - Gemini server connected to MongoDB
 - Private network for secure communication
@@ -166,7 +134,7 @@ Place your files in the `public/` directory:
 - `.gmi` files are processed with Handlebars
 - `.hbs` files are also processed as templates
 - Other files are served as-is
-- Directory index: `index.gmi`
+- Directory index: `index.gmi` or `ìndex.ts`
 
 ## Dynamic Routes
 
@@ -185,10 +153,12 @@ export default function() {
 ## Contributing
 
 Contributions are welcome! Feel free to:
+
 - Add new Handlebars helpers in `src/utils/styles.ts`
 - Improve the comments system
 - Add new features
 - Fix bugs
+- Improve security
 
 Create a PR with your changes.
 

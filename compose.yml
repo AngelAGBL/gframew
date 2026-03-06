@@ -6,7 +6,7 @@ services:
     environment:
       MONGO_INITDB_DATABASE: gemini_comments
     volumes:
-      - ./mongo:/data/db
+      - ./mongo:/data/db:z
 
   gemfw:
     build:

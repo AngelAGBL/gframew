@@ -14,43 +14,29 @@ export interface DynamicRouteResponse {
 /**
  * Attempts to serve a dynamic route from .ts or .js files.
  */
-export async function serveDynamicRoute(socket: TLSSocket, pathname: string): Promise<boolean> {
-  let safePath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '').slice(1);
-  
+export async function serveDynamicRoute(socket: TLSSocket, pathname: string, input: string): Promise<boolean> {
   // Handle directory requests
-  if (safePath.endsWith('/') || safePath === '') {
-    safePath = path.join(safePath, 'index.ts');
-  }
+  if (!pathname.endsWith('.ts')) return false;
+  if (pathname.endsWith('/') || pathname === '') pathname = path.join(pathname, 'index.ts');
 
-  if (!(safePath.endsWith('.ts') || safePath.endsWith('.js'))) return false;
-
-  // Remove leading slash if present
-  if (safePath.startsWith('/')) safePath = safePath.slice(1);
-  
   // Construir ruta absoluta desde el directorio del archivo actual
-  const baseDir = path.resolve(path.dirname(new URL(import.meta.url).pathname));
-  const routesDir = path.resolve(baseDir, "../../" + config.publicDir);
-  
-  let routeFile: string | null = null;
-  const testPath = path.resolve(routesDir, safePath);
-  if (fs.existsSync(testPath) && fs.statSync(testPath).isFile()) routeFile = testPath;
-  if (!routeFile) return false;
+  const baseDir = path.resolve(path.dirname(new URL(import.meta.url).pathname),  "../../");
+  let fullPath = path.resolve(baseDir, config.publicDir, pathname);
+  if (!(fs.existsSync(fullPath) && fs.statSync(fullPath).isFile())) {
+    logger.warn(`File not found: ${pathname}`);
+    return false;
+  }
   
   try {
-    logger.info(`→ Dynamic route: ${routeFile}`);
-    
-    // Import the module dynamically
-    const module = await import(routeFile);
-    
-    // Look for default export or handler function
+    logger.info(`Dynamic route: ${fullPath}`);
+    const module = await import(fullPath);
     const handler = module.default || module.handler;
-    
+
     if (typeof handler !== 'function') {
-      logger.error(`Dynamic route ${routeFile} does not export a function`);
+      logger.error(`Dynamic route ${fullPath} does not export a function`);
       return false;
     }
     
-    // Execute the handler
     const result: string | DynamicRouteResponse = await handler();
     
     // Process the result
@@ -74,12 +60,9 @@ export async function serveDynamicRoute(socket: TLSSocket, pathname: string): Pr
     socket.write(`${statusCode} ${meta}\r\n`);
     socket.write(content);
     
-    const fileSize = Buffer.byteLength(content);
-    logger.info(`✓ Dynamic route served: ${routeFile} [${meta}] ${fileSize} bytes`);
-    
     return true;
   } catch (error) {
-    logger.error(`Error executing dynamic route ${routeFile}: ${error}`);
+    logger.error(`Error executing dynamic route ${fullPath}: ${error}`);
     return false;
   }
 }

@@ -14,11 +14,10 @@ registerHandlebarsHelpers();
 
 function getClientCertificate(socket: TLSSocket): string | null {
   const cert = socket.getPeerCertificate();
+  logger.info(cert.toString());
   if (cert && Object.keys(cert).length > 0) {
     const cn = cert.subject?.CN;
-    if (cn) {
-      return Array.isArray(cn) ? cn[0] : cn;
-    }
+    if (cn) return Array.isArray(cn) ? cn[0] : cn;
     return cert.fingerprint || 'anonymous';
   }
   return null;
@@ -27,47 +26,33 @@ function getClientCertificate(socket: TLSSocket): string | null {
 /**
  * Serves a static file from the public directory.
  */
-export async function serveStaticFile(socket: TLSSocket, filePath: string): Promise<boolean> {
-  // Parse URL to extract query parameters
-  const urlParts = filePath.split('?');
-  const pathname = urlParts[0];
-  const queryString = urlParts[1] || '';
-  
-  let safePath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '').slice(1);
-  
+export async function serveStaticFile(socket: TLSSocket, pathname: string, input : string): Promise<boolean> {
   // Handle directory requests by looking for index.gmi
-  if (safePath.endsWith('/') || safePath === '') {
-    safePath = path.join(safePath, 'index.gmi');
-  }
-  
+  if (pathname.endsWith('/') || pathname === '') pathname = path.join(pathname, 'index.gmi');
+
   // Construir ruta absoluta desde el directorio del archivo actual
-  const baseDir = path.resolve(path.dirname(new URL(import.meta.url).pathname));
-  let fullPath = path.resolve(baseDir, "../../" + config.publicDir, safePath);
-  const originalPath = fullPath;
+  const baseDir = path.resolve(path.dirname(new URL(import.meta.url).pathname),  "../../");
+  let fullPath = path.resolve(baseDir, config.publicDir, pathname);
 
   // If file doesn't exist, try with .hbs extension
   if (!fs.existsSync(fullPath)) {
     const hbsPath = fullPath + '.hbs';
-    if (fs.existsSync(hbsPath)) {
-      fullPath = hbsPath;
-    }
+    if (fs.existsSync(hbsPath)) fullPath = hbsPath;
   }
   
   if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) {
-    logger.warn(`File not found: ${safePath}`);
+    logger.warn(`File not found: ${pathname}`);
     return false;
   }
 
   // Handle comment functionality for .gmi files
-  if (safePath.endsWith('.gmi') && queryString) {
+  if (pathname.endsWith('.gmi') && input) {
     const fileContent = fs.readFileSync(fullPath, 'utf-8');
-    
-    // Only process comments if the file contains {{comments}} tag
     if (fileContent.includes('{{comments}}')) {
       const clientCert = getClientCertificate(socket);
       
       // Handle comment submission (any query parameter that's not "comment")
-      if (queryString !== 'comment') {
+      if (input !== 'comment') {
         if (!clientCert) {
           socket.write('60 Certificate needed\r\n');
           socket.end();
@@ -75,8 +60,8 @@ export async function serveStaticFile(socket: TLSSocket, filePath: string): Prom
         }
         
         // Save the comment to MongoDB
-        const commentText = decodeURIComponent(queryString);
-        await addComment(safePath, clientCert, commentText);
+        const commentText = decodeURIComponent(input);
+        await addComment(pathname, clientCert, commentText);
         
         // Redirect to original file
         socket.write(`30 ${pathname}\r\n`);
@@ -85,7 +70,7 @@ export async function serveStaticFile(socket: TLSSocket, filePath: string): Prom
       }
       
       // Handle comment form request (?comment)
-      if (queryString === 'comment') {
+      if (input === 'comment') {
         if (!clientCert) {
           socket.write('60 Certificate needed\r\n');
           socket.end();
@@ -110,7 +95,7 @@ export async function serveStaticFile(socket: TLSSocket, filePath: string): Prom
       // Load comments if the template contains {{comments}}
       let commentsHtml = '';
       if (contentStr.includes('{{comments}}')) {
-        const comments = await getComments(safePath);
+        const comments = await getComments(pathname);
         commentsHtml = formatComments(comments);
       }
       

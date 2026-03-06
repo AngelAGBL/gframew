@@ -15,7 +15,6 @@ const server = tls.createServer(
   },
   (socket) => {
     socket.once('data', (data) => handleRequest(socket, data));
-    
     socket.on('error', (error) => {
       logger.error(`Socket error: ${error.message}`);
     });

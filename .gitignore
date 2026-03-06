@@ -38,7 +38,7 @@ public/*
 !public/.gitkeep
 
 # MongoDB data (if running locally)
-mongo-data/
+mongo/
 
 # Old JSON comments file (replaced by MongoDB)
 comments.json

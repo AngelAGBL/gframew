@@ -1,6 +1,6 @@
 export const config = {
   allowedDomains: ['localhost', 'example.com'],
-  publicDir: 'public',
-  port: 1965,
-  lang: 'es'
-} as const;
+  publicDir: process.env.PUBLIC_DIR || 'public',
+  port: process.env.PORT || 1965,
+  lang: process.env.LANG || 'es'
+};

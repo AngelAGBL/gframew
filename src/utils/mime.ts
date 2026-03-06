@@ -25,7 +25,8 @@ export function getMimeType(filePath: string): string {
     '.svg': 'image/svg+xml',
     '.pdf': 'application/pdf',
     '.json': 'application/json',
-    '.xml': 'application/xml'
+    '.xml': 'application/xml',
+    '.fontpack': 'application/lagrange-fontpack+zip',
   };
   return mimeTypes[ext] || 'application/octet-stream';
 }

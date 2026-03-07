@@ -53,12 +53,11 @@ export function formatComments(comments: Comment[]): string {
     return `📅 ${day} ${month} ${year} - ⏰ ${time}`;
   };
   
-  let result = '## Comentarios\n\n=> ?input Escribe tu comentario\n';
+  let result = '';
   for (const comment of comments) {
     const date = formatDate(comment.timestamp);
     result += `\n👤 ${comment.username} - ${date}\n`;
     result += `> ${comment.comment}\n`;
   }
-  result += '\n=> ?input Escribe tu comentario\n';
   return result;
 }

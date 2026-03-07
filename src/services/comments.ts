@@ -41,20 +41,23 @@ export function formatComments(comments: Comment[]): string {
   }
   
   const formatDate = (date: Date): string => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    const seconds = String(date.getSeconds()).padStart(2, '0');
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    const month = date.toLocaleString('en-US', { month: 'long' }).toLowerCase();
+    const year = date.getFullYear();
+    const time = date.toLocaleString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit',
+      hour12: true 
+    });
+    return `📅 ${day} ${month} ${year} - ⏰ ${time}`;
   };
   
-  let result = '## Comentarios\n\n=> ?input Escribe tu comentario';
+  let result = '## Comentarios\n\n=> ?input Escribe tu comentario\n';
   for (const comment of comments) {
     const date = formatDate(comment.timestamp);
-    result += `\n### 👤 ${comment.username} - ${date}\n`;
-    result += `${comment.comment}\n`;
+    result += `\n👤 ${comment.username} - ${date}\n`;
+    result += `> ${comment.comment}\n`;
   }
   result += '\n=> ?input Escribe tu comentario\n';
   return result;

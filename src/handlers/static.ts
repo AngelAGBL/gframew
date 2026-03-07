@@ -115,18 +115,23 @@ export async function serveStaticFile(socket: TLSSocket, pathname: string, input
       
       // Load comments if the template contains {{comments}}
       let commentsHtml = '';
-      if (contentStr.includes('{{comments}}')) {
+      if (contentStr.includes('{{{comments}}}')) {
         const comments = await getComments(pathname);
         commentsHtml = formatComments(comments);
       }
       
-      const template = Handlebars.compile(contentStr);
-      const context = {
-        date: new Date().toISOString(),
-        year: new Date().getFullYear(),
-        comments: commentsHtml
-      };
-      content = template(context);
+      try {
+        const template = Handlebars.compile(contentStr);
+        const context = {
+          date: new Date().toISOString(),
+          year: new Date().getFullYear(),
+          comments: commentsHtml
+        };
+        content = template(context);
+      } catch (error) {
+        logger.error(`Handlebars compilation error in ${fullPath}: ${error}`);
+        content = contentStr; // Serve raw content as last resort
+      }
     }
     
     const mimeType = getMimeType(fullPath);

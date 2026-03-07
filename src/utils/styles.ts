@@ -23,19 +23,32 @@ const createUnicodeMap = (startCode: number) => {
 };
 
 const UNICODE_MAPS = {
-  bold: createUnicodeMap(0x1D400),
-  italic: createUnicodeMap(0x1D434),
+  bold: createUnicodeMap(0x1D400),           // Mathematical Bold
+  italic: createUnicodeMap(0x1D434),         // Mathematical Italic
+  'bold-italic': createUnicodeMap(0x1D468),  // Mathematical Bold Italic
+  script: createUnicodeMap(0x1D49C),         // Mathematical Script
+  'bold-script': createUnicodeMap(0x1D4D0),  // Mathematical Bold Script
+  fraktur: createUnicodeMap(0x1D504),        // Mathematical Fraktur
+  'bold-fraktur': createUnicodeMap(0x1D56C), // Mathematical Bold Fraktur
+  doublestruck: createUnicodeMap(0x1D538),   // Mathematical Double-Struck
+  sans: createUnicodeMap(0x1D5A0),           // Mathematical Sans-Serif
+  'sans-bold': createUnicodeMap(0x1D5D4),    // Mathematical Sans-Serif Bold
+  'sans-italic': createUnicodeMap(0x1D608),  // Mathematical Sans-Serif Italic
+  'sans-bold-italic': createUnicodeMap(0x1D63C), // Mathematical Sans-Serif Bold Italic
+  monospace: createUnicodeMap(0x1D670),      // Mathematical Monospace
 };
 
 function transformUnicode(text: string, styles: string[]): string {
   let result = text;
   for (const style of styles) {
-    if (style === 'bold' || style === 'italic') {
-      const map = UNICODE_MAPS[style];
+    if (style in UNICODE_MAPS) {
+      const map = UNICODE_MAPS[style as keyof typeof UNICODE_MAPS];
       result = result.split('').map(c => map[c] || c).join('');
-    } else if (style === 'underline') {
+    }
+    if (style === 'underline') {
       result = result.split('').map(c => c + '\u0332').join('');
-    } else if (style === 'strikethrough') {
+    }
+    if (style === 'strikethrough') {
       result = result.split('').map(c => c + '\u0336').join('');
     }
   }

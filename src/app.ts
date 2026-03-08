@@ -92,7 +92,6 @@ const handleTLSSocket = (socket: tls.TLSSocket, clientAddress: string) => {
   let buffer = Buffer.alloc(0);
   let requestComplete = false;
   let validationFailed = false;
-  let handshakeComplete = false;
 
   const cleanup = () => {
     socket.removeAllListeners();
@@ -116,14 +115,14 @@ const handleTLSSocket = (socket: tls.TLSSocket, clientAddress: string) => {
   };
 
   socket.on('secureConnect', () => {
-    handshakeComplete = true;
     logger.info(`✓ TLS established for ${clientAddress}`);
   });
 
   socket.on('data', (chunk: Buffer) => {
-    if (requestComplete || validationFailed || !handshakeComplete) return;
+    if (requestComplete || validationFailed) return;
 
     buffer = Buffer.concat([buffer, chunk]);
+    
     if (buffer.length > MAX_REQUEST_SIZE) {
       rejectRequest('Request too long');
       return;
@@ -156,9 +155,13 @@ const handleTLSSocket = (socket: tls.TLSSocket, clientAddress: string) => {
   });
 
   socket.on('close', () => cleanup());
+  
   socket.setTimeout(REQUEST_TIMEOUT, () => {
-    if (!requestComplete && !validationFailed) rejectRequest('Timeout');
+    if (!requestComplete && !validationFailed) {
+      rejectRequest('Timeout');
+    }
   });
+  
   socket.on('error', (error) => {
     if (!validationFailed && !requestComplete) {
       logger.error(`Socket error from ${clientAddress}: ${error.message}`);

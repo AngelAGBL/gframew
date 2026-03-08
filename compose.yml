@@ -17,10 +17,9 @@ services:
     environment:
       DOMAINS: localhost
       LANGUAGE: en
-      # PROXY: "true" # Uncomment to enable PROXY protocol mode (v1 and v2)
-                      # When enabled, server expects: PROXY header → TLS → Gemini request
-                      # Use this when behind HAProxy, nginx, or similar TCP proxies
-                      # Client certificates are still supported through TLS
+      # PROXY: "true"  # Uncomment to enable PROXY protocol mode (v1 and v2)
+                       # Flow: TCP → PROXY header → TLS → Gemini request
+                       # Client certificates (mTLS) are fully supported
     volumes:
       - ./public:/home/bun/app/public:z
       - ./server.crt:/home/bun/app/server.crt:z

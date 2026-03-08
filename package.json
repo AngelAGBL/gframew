@@ -2,15 +2,16 @@
   "name": "gemfw",
   "module": "src/app.ts",
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
   "private": true,
   "scripts": {
-    "start": "bun src/app.ts",
-    "dev": "bun --watch src/app.ts"
+    "start": "node --loader tsx src/app.ts",
+    "dev": "node --watch --loader tsx src/app.ts"
   },
   "type": "module",
   "dependencies": {

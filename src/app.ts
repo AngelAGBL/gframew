@@ -117,11 +117,18 @@ const handleConnection = (rawSocket: net.Socket) => {
   };
 
   const proxyTimeoutHandler = () => {
-    closeConnection('Timeout waiting for PROXY header');
+    if (!connectionClosed) {
+      closeConnection('Timeout waiting for PROXY header');
+    }
   };
 
   const handleProxyData = (chunk: Buffer) => {
+    if (connectionClosed) return;
+    
     proxyBuffer = Buffer.concat([proxyBuffer, chunk]);
+    
+    logger.debug(`Received ${chunk.length} bytes from ${realClientAddress}, total buffer: ${proxyBuffer.length} bytes`);
+    logger.debug(`First bytes: ${proxyBuffer.subarray(0, Math.min(32, proxyBuffer.length)).toString('hex')}`);
 
     // Try to detect PROXY protocol version
     if (proxyBuffer.length >= PROXY_V2_SIGNATURE.length && 
@@ -145,7 +152,16 @@ const handleConnection = (rawSocket: net.Socket) => {
       
       // Remove PROXY header and setup TLS
       const remainingData = proxyBuffer.subarray(headerLength);
-      setupTLS(remainingData);
+      
+      logger.info(`PROXY v2 parsed, remaining data: ${remainingData.length} bytes`);
+      if (remainingData.length > 0) {
+        logger.debug(`Remaining data first bytes: ${remainingData.subarray(0, Math.min(16, remainingData.length)).toString('hex')}`);
+      }
+      
+      // Check if connection is still valid before setting up TLS
+      if (!connectionClosed) {
+        setupTLS(remainingData);
+      }
       
     } else if (proxyBuffer.toString('utf-8', 0, Math.min(6, proxyBuffer.length)).startsWith(PROXY_V1_PREFIX)) {
       // PROXY v1
@@ -171,7 +187,16 @@ const handleConnection = (rawSocket: net.Socket) => {
       
       // Remove PROXY header and setup TLS
       const remainingData = proxyBuffer.subarray(crlfIndex + 2);
-      setupTLS(remainingData);
+      
+      logger.info(`PROXY v1 parsed, remaining data: ${remainingData.length} bytes`);
+      if (remainingData.length > 0) {
+        logger.debug(`Remaining data first bytes: ${remainingData.subarray(0, Math.min(16, remainingData.length)).toString('hex')}`);
+      }
+      
+      // Check if connection is still valid before setting up TLS
+      if (!connectionClosed) {
+        setupTLS(remainingData);
+      }
       
     } else if (proxyBuffer.length >= 6) {
       closeConnection('Expected PROXY protocol header');
@@ -180,13 +205,21 @@ const handleConnection = (rawSocket: net.Socket) => {
   };
 
   const setupTLS = (remainingData: Buffer) => {
+    if (connectionClosed) {
+      logger.debug(`Connection already closed, skipping TLS setup for ${realClientAddress}`);
+      return;
+    }
+
+    logger.info(`Setting up TLS for ${realClientAddress}`);
+
     // Remove proxy data handler
     rawSocket.removeListener('data', handleProxyData);
     rawSocket.removeListener('timeout', proxyTimeoutHandler);
 
     // Check if socket is still valid
-    if (connectionClosed || !rawSocket.readable) {
+    if (!rawSocket.readable || rawSocket.destroyed) {
       logger.debug(`Socket no longer valid for TLS setup from ${realClientAddress}`);
+      connectionClosed = true;
       return;
     }
 
@@ -196,6 +229,8 @@ const handleConnection = (rawSocket: net.Socket) => {
         isServer: true,
         ...TLS_OPTIONS
       });
+
+      logger.debug(`TLS socket created for ${realClientAddress}, waiting for handshake...`);
 
       // Handle TLS errors
       tlsSocket.on('error', (error) => {

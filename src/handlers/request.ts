@@ -31,7 +31,7 @@ export async function handleRequest(socket: TLSSocket, data: Buffer | string): P
       return;
     }
 
-    logger.info(`Requested: ${url}`);
+    logger.info(`Requested: ${url}, from: ${socket.remoteAddress}`);
     // Try dynamic route first, then static file
     if (await serveDynamicRoute(socket, pathname, input)) {}
     else if (await serveStaticFile(socket, pathname, input)) {}

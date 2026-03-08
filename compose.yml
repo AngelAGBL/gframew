@@ -8,11 +8,10 @@ services:
     volumes:
       - ./mongo:/data/db:z
 
-  gframew:
+  gemini:
     build:
       context: .
     image: gframew
-    container_name: gemini-server
     restart: unless-stopped
     depends_on:
       - mongo

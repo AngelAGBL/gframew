@@ -256,28 +256,28 @@ const handleConnectionWithProxy = (rawSocket: net.Socket) => {
     
     // Put the TLS data back using unshift
     if (tlsData.length > 0) {
-      logger.debug(`Calling unshift() with ${tlsData.length} bytes`);
-      logger.debug(`First 16 bytes of TLS data: ${tlsData.subarray(0, 16).toString('hex')}`);
+      logger.info(`Calling unshift() with ${tlsData.length} bytes`);
+      logger.info(`First 16 bytes of TLS data: ${tlsData.subarray(0, 16).toString('hex')}`);
       (rawSocket as any).unshift(tlsData);
-      logger.debug('unshift() completed');
+      logger.info('unshift() completed');
       
       // Verify the data is in the buffer
       const buffered = (rawSocket as any).readableLength || (rawSocket as any)._readableState?.length;
-      logger.debug(`Socket readable buffer length after unshift: ${buffered}`);
+      logger.info(`Socket readable buffer length after unshift: ${buffered}`);
     }
     
     // Resume the socket so TLS can read from it
-    logger.debug('Resuming socket...');
+    logger.info('Resuming socket...');
     rawSocket.resume();
-    logger.debug('Socket resumed');
+    logger.info('Socket resumed');
     
     // Create TLS socket
-    logger.debug('Creating TLSSocket...');
+    logger.info('Creating TLSSocket...');
     const tlsSocket = new tls.TLSSocket(rawSocket, {
       isServer: true,
       ...TLS_OPTIONS
     });
-    logger.debug('TLSSocket created');
+    logger.info('TLSSocket created');
     
     handleTLSSocket(tlsSocket, realClientAddress);
   };

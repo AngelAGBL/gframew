@@ -89,12 +89,13 @@ const parseProxyV2Header = (buffer: Buffer): { info: ProxyInfo | null; headerLen
 };
 
 const handleConnection = (rawSocket: net.Socket) => {
-  let proxyBuffer = Buffer.alloc(0);
+  let proxyHeaderLength = 0;
   let proxyParsed = false;
   let realClientAddress = rawSocket.remoteAddress || 'unknown';
   let realClientPort = rawSocket.remotePort || 0;
   let tlsSocket: tls.TLSSocket | null = null;
   let connectionClosed = false;
+  let dataBuffer = Buffer.alloc(0);
 
   const closeConnection = (message?: string) => {
     if (connectionClosed) return;
@@ -117,59 +118,48 @@ const handleConnection = (rawSocket: net.Socket) => {
   };
 
   const proxyTimeoutHandler = () => {
-    if (!connectionClosed) {
+    if (!connectionClosed && !proxyParsed) {
       closeConnection('Timeout waiting for PROXY header');
     }
   };
 
-  const handleProxyData = (chunk: Buffer) => {
-    if (connectionClosed) return;
-    
-    proxyBuffer = Buffer.concat([proxyBuffer, chunk]);
-    
-    logger.debug(`Received ${chunk.length} bytes from ${realClientAddress}, total buffer: ${proxyBuffer.length} bytes`);
-
+  const parseProxyHeader = () => {
     // Try to detect PROXY protocol version
-    if (proxyBuffer.length >= PROXY_V2_SIGNATURE.length && 
-        proxyBuffer.subarray(0, PROXY_V2_SIGNATURE.length).equals(PROXY_V2_SIGNATURE)) {
+    if (dataBuffer.length >= PROXY_V2_SIGNATURE.length && 
+        dataBuffer.subarray(0, PROXY_V2_SIGNATURE.length).equals(PROXY_V2_SIGNATURE)) {
       // PROXY v2
-      const { info, headerLength } = parseProxyV2Header(proxyBuffer);
+      const { info, headerLength } = parseProxyV2Header(dataBuffer);
       
       if (headerLength === 0) {
-        if (proxyBuffer.length > 512) {
+        if (dataBuffer.length > 512) {
           closeConnection('Invalid PROXY v2 header');
+          return false;
         }
-        return; // Wait for more data
+        return false; // Need more data
       }
       
-      proxyParsed = true;
+      proxyHeaderLength = headerLength;
       if (info) {
         realClientAddress = info.srcAddress;
         realClientPort = info.srcPort;
         logger.debug(`PROXY v2: Real client ${realClientAddress}:${realClientPort}`);
       }
+      return true;
       
-      // Check if we have data beyond the PROXY header
-      if (proxyBuffer.length > headerLength) {
-        logger.warn(`Received ${proxyBuffer.length - headerLength} bytes beyond PROXY header - this shouldn't happen`);
-      }
-      
-      // Setup TLS - it will read fresh data from the socket
-      setupTLS();
-      
-    } else if (proxyBuffer.toString('utf-8', 0, Math.min(6, proxyBuffer.length)).startsWith(PROXY_V1_PREFIX)) {
+    } else if (dataBuffer.toString('utf-8', 0, Math.min(6, dataBuffer.length)).startsWith(PROXY_V1_PREFIX)) {
       // PROXY v1
-      const bufferStr = proxyBuffer.toString('utf-8');
+      const bufferStr = dataBuffer.toString('utf-8');
       const crlfIndex = bufferStr.indexOf('\r\n');
       
       if (crlfIndex === -1) {
-        if (proxyBuffer.length > 108) {
+        if (dataBuffer.length > 108) {
           closeConnection('Invalid PROXY v1 header');
+          return false;
         }
-        return; // Wait for more data
+        return false; // Need more data
       }
       
-      proxyParsed = true;
+      proxyHeaderLength = crlfIndex + 2;
       const proxyLine = bufferStr.substring(0, crlfIndex);
       const info = parseProxyV1Header(proxyLine);
       
@@ -178,19 +168,56 @@ const handleConnection = (rawSocket: net.Socket) => {
         realClientPort = info.srcPort;
         logger.debug(`PROXY v1: Real client ${realClientAddress}:${realClientPort}`);
       }
+      return true;
       
-      // Check if we have data beyond the PROXY header
-      if (proxyBuffer.length > crlfIndex + 2) {
-        logger.warn(`Received ${proxyBuffer.length - crlfIndex - 2} bytes beyond PROXY header - this shouldn't happen`);
+    } else if (dataBuffer.length >= 6) {
+      closeConnection('Expected PROXY protocol header');
+      return false;
+    }
+    
+    return false; // Need more data
+  };
+
+  const handleProxyData = (chunk: Buffer) => {
+    if (connectionClosed || proxyParsed) return;
+    
+    dataBuffer = Buffer.concat([dataBuffer, chunk]);
+    logger.debug(`Received ${chunk.length} bytes, total: ${dataBuffer.length} bytes`);
+    
+    if (parseProxyHeader()) {
+      proxyParsed = true;
+      logger.info(`PROXY header parsed (${proxyHeaderLength} bytes), total received: ${dataBuffer.length} bytes`);
+      
+      // Remove the data handler - critical!
+      rawSocket.removeListener('data', handleProxyData);
+      rawSocket.removeListener('timeout', proxyTimeoutHandler);
+      rawSocket.setTimeout(0);
+      
+      // Now we need to "put back" the data after the PROXY header
+      // The trick: use rawSocket.unshift() if available, or pause/resume
+      const remainingData = dataBuffer.subarray(proxyHeaderLength);
+      
+      if (remainingData.length > 0) {
+        logger.info(`Putting back ${remainingData.length} bytes to socket`);
+        
+        // Try Node.js unshift method
+        if (typeof (rawSocket as any).unshift === 'function') {
+          (rawSocket as any).unshift(remainingData);
+          logger.debug('Used unshift() to return data');
+        } else {
+          // Fallback: manually emit the data after TLS is set up
+          logger.debug('Will manually feed data to TLS');
+          setImmediate(() => {
+            if (tlsSocket && !connectionClosed) {
+              // Emit data event on the raw socket so TLS can read it
+              rawSocket.emit('data', remainingData);
+            }
+          });
+        }
       }
       
-      // Setup TLS - it will read fresh data from the socket
       setupTLS();
-      
-    } else if (proxyBuffer.length >= 6) {
-      closeConnection('Expected PROXY protocol header');
     }
-    // else: Wait for more data to determine protocol
   };
 
   const setupTLS = () => {

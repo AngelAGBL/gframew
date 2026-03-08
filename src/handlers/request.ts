@@ -1,5 +1,6 @@
 import path from 'path';
 import type { TLSSocket } from 'tls';
+import type { Socket } from 'net';
 import logger from '../config/logger.ts';
 import { isAllowedDomain } from '../utils/validation.ts';
 import { serveStaticFile } from './static.ts';
@@ -8,7 +9,7 @@ import { serveDynamicRoute } from './dynamic.ts';
 /**
  * Handles incoming Gemini protocol requests.
  */
-export async function handleRequest(socket: TLSSocket, data: Buffer | string): Promise<void> {
+export async function handleRequest(socket: Socket | TLSSocket, data: Buffer | string): Promise<void> {
   try {
     // Hey you, URL class already normalizes the path
     // so we don't need to do it never (Anti path traversal)

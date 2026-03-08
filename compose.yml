@@ -1,7 +1,6 @@
 services:
   mongo:
     image: mongo
-    container_name: gframew-mongo
     restart: unless-stopped
     environment:
       MONGO_INITDB_DATABASE: gemini_comments
@@ -18,12 +17,13 @@ services:
     environment:
       DOMAINS: localhost
       LANGUAGE: en
+      # PROXY: "true" # Uncomment to enable PROXY protocol mode (v1 and v2)
+                      # When enabled, server expects: PROXY header → TLS → Gemini request
+                      # Use this when behind HAProxy, nginx, or similar TCP proxies
+                      # Client certificates are still supported through TLS
     volumes:
       - ./public:/home/bun/app/public:z
       - ./server.crt:/home/bun/app/server.crt:z
       - ./server.key:/home/bun/app/server.key:z
     ports:
       - 1965:1965
-
-volumes:
-  mongo-data:

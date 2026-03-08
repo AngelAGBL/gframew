@@ -118,6 +118,47 @@ Current date: {{date}}
 
 - `MONGO_URL` - MongoDB connection URL (default: `mongodb://mongo:27017`)
 - `MONGO_DB` - Database name (default: `gemini_comments`)
+- `PROXY` - Enable PROXY protocol mode (default: `false`)
+  - Set to `true` to enable PROXY protocol v1 and v2 support
+  - When enabled, the server expects PROXY headers followed by TLS
+  - The server parses PROXY headers first, then establishes TLS on the underlying socket
+  - Client certificates are still supported through the TLS layer
+
+### PROXY Protocol Mode
+
+When `PROXY=true`, the server:
+
+- Accepts PROXY protocol v1 and v2 headers
+- Extracts real client IP and port from PROXY headers
+- Establishes TLS connection AFTER parsing the PROXY header
+- Supports client certificate authentication through the TLS layer
+
+The flow is: `TCP → PROXY header → TLS handshake → Gemini request`
+
+Example with HAProxy:
+
+```haproxy
+frontend gemini_frontend
+    bind *:1965
+    mode tcp
+    default_backend gemini_backend
+
+backend gemini_backend
+    mode tcp
+    server gemini1 127.0.0.1:1966 send-proxy-v2
+```
+
+Then run your Gemini server:
+
+```bash
+PROXY=true bun run src/app.ts
+```
+
+The server will:
+1. Receive the connection
+2. Parse the PROXY protocol header to get real client IP
+3. Establish TLS on the underlying socket
+4. Process the Gemini request with client certificate support
 
 ### Docker Compose
 

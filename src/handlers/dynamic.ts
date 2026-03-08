@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { TLSSocket } from 'tls';
+import type { Socket } from 'net';
 import logger from '../config/logger.ts';
 import { config } from '../config/server.ts';
 
@@ -14,7 +15,7 @@ export interface DynamicRouteResponse {
 /**
  * Attempts to serve a dynamic route from .ts or .js files.
  */
-export async function serveDynamicRoute(socket: TLSSocket, pathname: string, input: string): Promise<boolean> {
+export async function serveDynamicRoute(socket: Socket | TLSSocket, pathname: string, input: string): Promise<boolean> {
   // Handle directory requests
   if (!pathname.endsWith('.ts')) return false;
   if (pathname.endsWith('/') || pathname === '') pathname = path.join(pathname, 'index.ts');

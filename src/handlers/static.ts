@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import Handlebars from 'handlebars';
 import type { TLSSocket } from 'tls';
+import type { Socket } from 'net';
 import logger from '../config/logger.ts';
 import { config } from '../config/server.ts';
 import { getMimeType } from '../utils/mime.ts';
@@ -12,7 +13,13 @@ import { getComments, addComment, formatComments } from '../services/comments.ts
 // Register helpers once when module loads
 registerHandlebarsHelpers();
 
-function getClientCertificate(socket: TLSSocket): string | null {
+function getClientCertificate(socket: Socket | TLSSocket): string | null {
+  // Check if socket is a TLSSocket
+  if (!('getPeerCertificate' in socket)) {
+    logger.info('No TLS connection, no client certificate available');
+    return null;
+  }
+  
   const cert = socket.getPeerCertificate();
   
   // Check if certificate exists and is not empty
@@ -45,7 +52,7 @@ function getClientCertificate(socket: TLSSocket): string | null {
 /**
  * Serves a static file from the public directory.
  */
-export async function serveStaticFile(socket: TLSSocket, pathname: string, input : string): Promise<boolean> {
+export async function serveStaticFile(socket: Socket | TLSSocket, pathname: string, input : string): Promise<boolean> {
   // Handle directory requests by looking for index.gmi
   if (pathname.endsWith('/') || pathname === '') pathname = path.join(pathname, 'index.gmi');
 

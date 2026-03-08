@@ -17,9 +17,9 @@ services:
     environment:
       DOMAINS: localhost
       LANGUAGE: en
-      PROXY: "true"  # Habilitado para probar con Node.js
-                     # Flow: TCP → PROXY header → TLS → Gemini request
-                     # Client certificates (mTLS) are fully supported
+      # PROXY: "true"  # Habilitado para probar con Node.js
+                      # Flow: TCP → PROXY header → TLS → Gemini request
+                      # Client certificates (mTLS) are fully supported
     volumes:
       - ./public:/app/public:z
       - ./server.crt:/app/server.crt:z

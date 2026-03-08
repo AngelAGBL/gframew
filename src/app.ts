@@ -210,9 +210,12 @@ const handleConnection = (rawSocket: net.Socket) => {
       return;
     }
 
-    logger.info(`Setting up TLS for ${realClientAddress}`);
+    logger.info(`Setting up TLS for ${realClientAddress}, remaining data: ${remainingData.length} bytes`);
+    if (remainingData.length > 0) {
+      logger.debug(`First 16 bytes of remaining data: ${remainingData.subarray(0, Math.min(16, remainingData.length)).toString('hex')}`);
+    }
 
-    // Remove proxy data handler
+    // Remove proxy data handler and timeout
     rawSocket.removeListener('data', handleProxyData);
     rawSocket.removeListener('timeout', proxyTimeoutHandler);
 
@@ -230,7 +233,23 @@ const handleConnection = (rawSocket: net.Socket) => {
         ...TLS_OPTIONS
       });
 
-      logger.debug(`TLS socket created for ${realClientAddress}, waiting for handshake...`);
+      logger.debug(`TLS socket created for ${realClientAddress}`);
+
+      // If we have remaining data from PROXY header parsing, push it to TLS socket
+      if (remainingData.length > 0) {
+        logger.debug(`Pushing ${remainingData.length} bytes to TLS socket`);
+        // Use internal _handle to push data if available, otherwise emit data event
+        if ((tlsSocket as any)._handle && typeof (tlsSocket as any)._handle.receive === 'function') {
+          (tlsSocket as any)._handle.receive(null, remainingData);
+        } else {
+          // Fallback: emit data event directly
+          setImmediate(() => {
+            if (!connectionClosed) {
+              tlsSocket!.emit('data', remainingData);
+            }
+          });
+        }
+      }
 
       // Handle TLS errors
       tlsSocket.on('error', (error) => {
@@ -241,7 +260,7 @@ const handleConnection = (rawSocket: net.Socket) => {
       });
 
       tlsSocket.on('secureConnect', () => {
-        logger.debug(`TLS established for ${realClientAddress}`);
+        logger.info(`✓ TLS handshake completed for ${realClientAddress}`);
       });
 
       // Start processing Gemini protocol

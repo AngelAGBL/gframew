@@ -2,6 +2,7 @@ import logger from './config/logger.ts';
 import tls from 'tls';
 import net from 'net';
 import fs from 'fs';
+import { Duplex } from 'stream';
 import { config } from './config/server.ts';
 import { handleRequest } from './handlers/request.ts';
 import { database } from './config/database.ts';
@@ -227,15 +228,49 @@ const handleConnection = (rawSocket: net.Socket) => {
     }
 
     try {
-      // If we have remaining data, we need to unshift it back to the socket's read buffer
-      // This is the proper way to handle data that was read but needs to be processed by TLS
-      if (remainingData.length > 0 && (rawSocket as any).unshift) {
-        logger.debug(`Unshifting ${remainingData.length} bytes back to socket`);
-        (rawSocket as any).unshift(remainingData);
+      // Create a wrapper stream that prepends the remaining data
+      let prependedData = false;
+      const socketWrapper = new Duplex({
+        read() {
+          // Don't do anything, data will come from rawSocket
+        },
+        write(chunk: Buffer, encoding: string, callback: Function) {
+          // Forward writes to the raw socket
+          rawSocket.write(chunk, encoding as BufferEncoding, callback as any);
+        }
+      });
+
+      // Forward data from raw socket to wrapper, prepending our buffered data first
+      rawSocket.on('data', (chunk: Buffer) => {
+        if (!prependedData && remainingData.length > 0) {
+          prependedData = true;
+          logger.debug(`Prepending ${remainingData.length} bytes before forwarding ${chunk.length} bytes`);
+          socketWrapper.push(remainingData);
+        }
+        socketWrapper.push(chunk);
+      });
+
+      rawSocket.on('end', () => {
+        socketWrapper.push(null);
+      });
+
+      rawSocket.on('error', (err) => {
+        socketWrapper.destroy(err);
+      });
+
+      // If we have remaining data but no more data is coming, push it now
+      if (remainingData.length > 0) {
+        setImmediate(() => {
+          if (!prependedData) {
+            prependedData = true;
+            logger.debug(`Pushing ${remainingData.length} bytes immediately`);
+            socketWrapper.push(remainingData);
+          }
+        });
       }
 
-      // Create TLS socket wrapping the raw socket
-      tlsSocket = new tls.TLSSocket(rawSocket, {
+      // Create TLS socket wrapping the wrapper stream
+      tlsSocket = new tls.TLSSocket(socketWrapper as any, {
         isServer: true,
         ...TLS_OPTIONS
       });

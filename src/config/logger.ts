@@ -1,6 +1,6 @@
 import pino from 'pino';
 export default pino({
-  level: 'debug',
+  level: 'info',
   base: false,
   timestamp: false
 });

@@ -96,8 +96,16 @@ const handleTLSSocket = (socket: tls.TLSSocket, clientAddress: string) => {
     if (validationFailed || requestComplete) return;
     validationFailed = true;
     logger.warn(`${message} from ${clientAddress}`);
-    try { if (socket.writable) socket.write(`59 Bad Request: ${message}\r\n`); } catch (e) {}
-    try { socket.destroy(); } catch (e) {}
+    try { 
+      if (socket.writable) socket.write(`59 Bad Request: ${message}\r\n`); 
+    } catch (e) {
+      logger.debug(`Could not write error: ${e}`);
+    }
+    try { 
+      if (!socket.destroyed) socket.destroy(); 
+    } catch (e) {
+      logger.debug(`Could not destroy socket: ${e}`);
+    }
     cleanup();
   };
 
@@ -216,22 +224,39 @@ const handleConnectionWithProxy = (rawSocket: net.Socket) => {
     
     // Get TLS data
     const tlsData = dataBuffer.subarray(proxyHeaderLength);
-    logger.debug(`PROXY parsed, TLS data: ${tlsData.length} bytes`);
+    logger.info(`PROXY parsed, TLS data buffered: ${tlsData.length} bytes`);
+    
+    // CRITICAL: We need to make the TLS data available to TLS
+    // The only reliable way is to create a passthrough that injects it
+    let dataInjected = false;
+    const originalRead = rawSocket.read.bind(rawSocket);
+    
+    // Override read to inject our buffered data first
+    (rawSocket as any).read = function(size?: number) {
+      if (!dataInjected && tlsData.length > 0) {
+        dataInjected = true;
+        logger.debug(`Injecting ${tlsData.length} bytes via read()`);
+        return tlsData;
+      }
+      return originalRead(size);
+    };
+    
+    // Also handle the case where TLS uses 'readable' event
+    if (tlsData.length > 0 && !dataInjected) {
+      setImmediate(() => {
+        if (!dataInjected) {
+          dataInjected = true;
+          logger.debug(`Emitting readable with ${tlsData.length} bytes buffered`);
+          rawSocket.emit('readable');
+        }
+      });
+    }
     
     // Create TLS socket
     const tlsSocket = new tls.TLSSocket(rawSocket, {
       isServer: true,
       ...TLS_OPTIONS
     });
-    
-    // Feed TLS data using internal API
-    if (tlsData.length > 0) {
-      setImmediate(() => {
-        if ((tlsSocket as any)._handle && (tlsSocket as any)._handle.onread) {
-          (tlsSocket as any)._handle.onread(tlsData.length, tlsData);
-        }
-      });
-    }
     
     handleTLSSocket(tlsSocket, realClientAddress);
   };

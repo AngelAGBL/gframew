@@ -101,7 +101,15 @@ const handleConnection = (socket: net.Socket) => {
       if (validationFailed || requestComplete) return;
       validationFailed = true;
       logger.warn(`${message} from ${realClientAddress}`);
-      activeSocket.write(`59 Bad Request: ${message}\r\n`);
+      
+      try {
+        if (activeSocket.writable) {
+          activeSocket.write(`59 Bad Request: ${message}\r\n`);
+        }
+      } catch (error) {
+        logger.debug(`Could not write error message: ${error}`);
+      }
+      
       activeSocket.destroy();
       cleanup();
     };
@@ -117,7 +125,13 @@ const handleConnection = (socket: net.Socket) => {
       if (!requestComplete && !validationFailed) {
         if (buffer.length > 0) {
           logger.warn(`Client closed connection with incomplete request from ${realClientAddress}`);
-          activeSocket.write('59 Bad Request: Incomplete request\r\n');
+          try {
+            if (activeSocket.writable) {
+              activeSocket.write('59 Bad Request: Incomplete request\r\n');
+            }
+          } catch (error) {
+            logger.debug(`Could not write error message: ${error}`);
+          }
           validationFailed = true;
         }
         cleanup();
@@ -133,7 +147,7 @@ const handleConnection = (socket: net.Socket) => {
       cleanup();
     };
 
-    const setupTLS = () => {
+    const setupTLS = (remainingData: Buffer) => {
       // Remove listeners from plain socket
       socket.removeListener('data', dataHandler);
       socket.removeListener('end', endHandler);
@@ -165,6 +179,9 @@ const handleConnection = (socket: net.Socket) => {
       tlsSocket.on('secureConnect', () => {
         logger.debug(`TLS established for ${realClientAddress}`);
       });
+
+      // If there's remaining data after PROXY header, it will be processed by TLS
+      // The TLS handshake should start immediately
     };
 
     const dataHandler = (chunk: Buffer) => {
@@ -191,14 +208,9 @@ const handleConnection = (socket: net.Socket) => {
             buffer = buffer.subarray(headerLength);
             
             // Setup TLS on the underlying socket
-            setupTLS();
-            
-            // If there's remaining data in buffer, feed it to TLS socket
-            if (buffer.length > 0) {
-              // The TLS handshake will consume this data
-              socket.unshift(buffer);
-              buffer = Buffer.alloc(0);
-            }
+            const remainingData = buffer;
+            buffer = Buffer.alloc(0); // Clear buffer for TLS data
+            setupTLS(remainingData);
             return;
           } else if (buffer.length > 512) {
             // Invalid PROXY v2 header
@@ -225,14 +237,9 @@ const handleConnection = (socket: net.Socket) => {
             buffer = buffer.subarray(crlfIndex + 2);
             
             // Setup TLS on the underlying socket
-            setupTLS();
-            
-            // If there's remaining data in buffer, feed it to TLS socket
-            if (buffer.length > 0) {
-              // The TLS handshake will consume this data
-              socket.unshift(buffer);
-              buffer = Buffer.alloc(0);
-            }
+            const remainingData = buffer;
+            buffer = Buffer.alloc(0); // Clear buffer for TLS data
+            setupTLS(remainingData);
             return;
           } else if (buffer.length > 108) {
             // PROXY v1 header too long (max is 108 bytes)

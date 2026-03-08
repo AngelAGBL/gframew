@@ -232,33 +232,18 @@ const handleConnectionWithProxy = (rawSocket: net.Socket) => {
     const tlsData = dataBuffer.subarray(proxyHeaderLength);
     logger.info(`PROXY parsed, TLS data buffered: ${tlsData.length} bytes`);
     
-    // CRITICAL: We need to make the TLS data available to TLS
-    // The only reliable way is to create a passthrough that injects it
-    let dataInjected = false;
-    const originalRead = rawSocket.read.bind(rawSocket);
-    
-    // Override read to inject our buffered data first
-    (rawSocket as any).read = function(size?: number) {
-      if (!dataInjected && tlsData.length > 0) {
-        dataInjected = true;
-        logger.debug(`Injecting ${tlsData.length} bytes via read()`);
-        return tlsData;
+    // In Node.js, we can use unshift() to put data back into the socket's read buffer
+    if (tlsData.length > 0) {
+      // unshift() exists in Node.js streams
+      if (typeof (rawSocket as any).unshift === 'function') {
+        logger.debug('Using unshift() to return TLS data to socket buffer');
+        (rawSocket as any).unshift(tlsData);
+      } else {
+        logger.error('unshift() not available - this should not happen in Node.js');
       }
-      return originalRead(size);
-    };
-    
-    // Also handle the case where TLS uses 'readable' event
-    if (tlsData.length > 0 && !dataInjected) {
-      setImmediate(() => {
-        if (!dataInjected) {
-          dataInjected = true;
-          logger.debug(`Emitting readable with ${tlsData.length} bytes buffered`);
-          rawSocket.emit('readable');
-        }
-      });
     }
     
-    // Create TLS socket
+    // Create TLS socket - it will read the data we just unshifted
     const tlsSocket = new tls.TLSSocket(rawSocket, {
       isServer: true,
       ...TLS_OPTIONS

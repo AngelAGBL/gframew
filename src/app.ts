@@ -104,10 +104,15 @@ const handleConnection = (rawSocket: net.Socket) => {
       logger.warn(`${message} from ${realClientAddress}`);
     }
     
-    if (tlsSocket) {
-      tlsSocket.destroy();
-    } else {
-      rawSocket.destroy();
+    try {
+      if (tlsSocket) {
+        tlsSocket.destroy();
+      } else {
+        rawSocket.destroy();
+      }
+    } catch (error) {
+      // Ignore errors during cleanup
+      logger.debug(`Error closing connection: ${error}`);
     }
   };
 
@@ -179,24 +184,37 @@ const handleConnection = (rawSocket: net.Socket) => {
     rawSocket.removeListener('data', handleProxyData);
     rawSocket.removeListener('timeout', proxyTimeoutHandler);
 
-    // Create TLS socket wrapping the raw socket
-    tlsSocket = new tls.TLSSocket(rawSocket, {
-      isServer: true,
-      ...TLS_OPTIONS
-    });
+    // Check if socket is still valid
+    if (connectionClosed || !rawSocket.readable) {
+      logger.debug(`Socket no longer valid for TLS setup from ${realClientAddress}`);
+      return;
+    }
 
-    // Handle TLS errors
-    tlsSocket.on('error', (error) => {
-      logger.error(`TLS error from ${realClientAddress}: ${error.message}`);
+    try {
+      // Create TLS socket wrapping the raw socket
+      tlsSocket = new tls.TLSSocket(rawSocket, {
+        isServer: true,
+        ...TLS_OPTIONS
+      });
+
+      // Handle TLS errors
+      tlsSocket.on('error', (error) => {
+        if (!connectionClosed) {
+          logger.error(`TLS error from ${realClientAddress}: ${error.message}`);
+          closeConnection();
+        }
+      });
+
+      tlsSocket.on('secureConnect', () => {
+        logger.debug(`TLS established for ${realClientAddress}`);
+      });
+
+      // Start processing Gemini protocol
+      handleGeminiProtocol(tlsSocket, realClientAddress);
+    } catch (error) {
+      logger.error(`Failed to setup TLS for ${realClientAddress}: ${error}`);
       closeConnection();
-    });
-
-    tlsSocket.on('secureConnect', () => {
-      logger.debug(`TLS established for ${realClientAddress}`);
-    });
-
-    // Start processing Gemini protocol
-    handleGeminiProtocol(tlsSocket, realClientAddress);
+    }
   };
 
   const handleGeminiProtocol = (socket: tls.TLSSocket, clientAddress: string) => {
@@ -224,7 +242,12 @@ const handleConnection = (rawSocket: net.Socket) => {
         logger.debug(`Could not write error message: ${error}`);
       }
       
-      socket.destroy();
+      try {
+        socket.destroy();
+      } catch (error) {
+        logger.debug(`Error destroying socket: ${error}`);
+      }
+      
       cleanup();
     };
 
@@ -248,7 +271,11 @@ const handleConnection = (rawSocket: net.Socket) => {
           validationFailed = true;
         }
         cleanup();
-        socket.end();
+        try {
+          socket.end();
+        } catch (error) {
+          logger.debug(`Error ending socket: ${error}`);
+        }
       }
     };
 
@@ -297,7 +324,9 @@ const handleConnection = (rawSocket: net.Socket) => {
     socket.setTimeout(REQUEST_TIMEOUT, timeoutHandler);
 
     socket.on('error', (error) => {
-      logger.error(`Socket error from ${clientAddress}: ${error.message}`);
+      if (!validationFailed && !requestComplete) {
+        logger.error(`Socket error from ${clientAddress}: ${error.message}`);
+      }
       cleanup();
     });
   };
@@ -309,8 +338,10 @@ const handleConnection = (rawSocket: net.Socket) => {
     rawSocket.setTimeout(REQUEST_TIMEOUT, proxyTimeoutHandler);
     
     rawSocket.on('error', (error) => {
-      logger.error(`Raw socket error from ${realClientAddress}: ${error.message}`);
-      closeConnection();
+      if (!connectionClosed) {
+        logger.error(`Raw socket error from ${realClientAddress}: ${error.message}`);
+        closeConnection();
+      }
     });
   } else {
     // No PROXY, setup TLS immediately

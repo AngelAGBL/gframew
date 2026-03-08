@@ -268,6 +268,14 @@ const handleConnectionWithProxy = (rawSocket: net.Socket) => {
         });
         logger.info('TLSSocket created');
         
+        // Force TLS to read the buffered data by emitting 'readable'
+        if (tlsData.length > 0) {
+          setImmediate(() => {
+            logger.info('Emitting readable event to trigger TLS read');
+            rawSocket.emit('readable');
+          });
+        }
+        
         handleTLSSocket(tlsSocket, realClientAddress);
         return;
       }

@@ -2,7 +2,6 @@ import logger from './config/logger.ts';
 import tls from 'tls';
 import net from 'net';
 import fs from 'fs';
-import { Duplex } from 'stream';
 import { config } from './config/server.ts';
 import { handleRequest } from './handlers/request.ts';
 import { database } from './config/database.ts';
@@ -129,7 +128,6 @@ const handleConnection = (rawSocket: net.Socket) => {
     proxyBuffer = Buffer.concat([proxyBuffer, chunk]);
     
     logger.debug(`Received ${chunk.length} bytes from ${realClientAddress}, total buffer: ${proxyBuffer.length} bytes`);
-    logger.debug(`First bytes: ${proxyBuffer.subarray(0, Math.min(32, proxyBuffer.length)).toString('hex')}`);
 
     // Try to detect PROXY protocol version
     if (proxyBuffer.length >= PROXY_V2_SIGNATURE.length && 
@@ -151,18 +149,13 @@ const handleConnection = (rawSocket: net.Socket) => {
         logger.debug(`PROXY v2: Real client ${realClientAddress}:${realClientPort}`);
       }
       
-      // Remove PROXY header and setup TLS
-      const remainingData = proxyBuffer.subarray(headerLength);
-      
-      logger.info(`PROXY v2 parsed, remaining data: ${remainingData.length} bytes`);
-      if (remainingData.length > 0) {
-        logger.debug(`Remaining data first bytes: ${remainingData.subarray(0, Math.min(16, remainingData.length)).toString('hex')}`);
+      // Check if we have data beyond the PROXY header
+      if (proxyBuffer.length > headerLength) {
+        logger.warn(`Received ${proxyBuffer.length - headerLength} bytes beyond PROXY header - this shouldn't happen`);
       }
       
-      // Check if connection is still valid before setting up TLS
-      if (!connectionClosed) {
-        setupTLS(remainingData);
-      }
+      // Setup TLS - it will read fresh data from the socket
+      setupTLS();
       
     } else if (proxyBuffer.toString('utf-8', 0, Math.min(6, proxyBuffer.length)).startsWith(PROXY_V1_PREFIX)) {
       // PROXY v1
@@ -186,18 +179,13 @@ const handleConnection = (rawSocket: net.Socket) => {
         logger.debug(`PROXY v1: Real client ${realClientAddress}:${realClientPort}`);
       }
       
-      // Remove PROXY header and setup TLS
-      const remainingData = proxyBuffer.subarray(crlfIndex + 2);
-      
-      logger.info(`PROXY v1 parsed, remaining data: ${remainingData.length} bytes`);
-      if (remainingData.length > 0) {
-        logger.debug(`Remaining data first bytes: ${remainingData.subarray(0, Math.min(16, remainingData.length)).toString('hex')}`);
+      // Check if we have data beyond the PROXY header
+      if (proxyBuffer.length > crlfIndex + 2) {
+        logger.warn(`Received ${proxyBuffer.length - crlfIndex - 2} bytes beyond PROXY header - this shouldn't happen`);
       }
       
-      // Check if connection is still valid before setting up TLS
-      if (!connectionClosed) {
-        setupTLS(remainingData);
-      }
+      // Setup TLS - it will read fresh data from the socket
+      setupTLS();
       
     } else if (proxyBuffer.length >= 6) {
       closeConnection('Expected PROXY protocol header');
@@ -205,20 +193,18 @@ const handleConnection = (rawSocket: net.Socket) => {
     // else: Wait for more data to determine protocol
   };
 
-  const setupTLS = (remainingData: Buffer) => {
+  const setupTLS = () => {
     if (connectionClosed) {
       logger.debug(`Connection already closed, skipping TLS setup for ${realClientAddress}`);
       return;
     }
 
-    logger.info(`Setting up TLS for ${realClientAddress}, remaining data: ${remainingData.length} bytes`);
-    if (remainingData.length > 0) {
-      logger.debug(`First 16 bytes of remaining data: ${remainingData.subarray(0, Math.min(16, remainingData.length)).toString('hex')}`);
-    }
+    logger.info(`Setting up TLS for ${realClientAddress}`);
 
     // Remove proxy data handler and timeout
     rawSocket.removeListener('data', handleProxyData);
     rawSocket.removeListener('timeout', proxyTimeoutHandler);
+    rawSocket.setTimeout(0); // Clear timeout
 
     // Check if socket is still valid
     if (!rawSocket.readable || rawSocket.destroyed) {
@@ -228,49 +214,9 @@ const handleConnection = (rawSocket: net.Socket) => {
     }
 
     try {
-      // Create a wrapper stream that prepends the remaining data
-      let prependedData = false;
-      const socketWrapper = new Duplex({
-        read() {
-          // Don't do anything, data will come from rawSocket
-        },
-        write(chunk: Buffer, encoding: string, callback: Function) {
-          // Forward writes to the raw socket
-          rawSocket.write(chunk, encoding as BufferEncoding, callback as any);
-        }
-      });
-
-      // Forward data from raw socket to wrapper, prepending our buffered data first
-      rawSocket.on('data', (chunk: Buffer) => {
-        if (!prependedData && remainingData.length > 0) {
-          prependedData = true;
-          logger.debug(`Prepending ${remainingData.length} bytes before forwarding ${chunk.length} bytes`);
-          socketWrapper.push(remainingData);
-        }
-        socketWrapper.push(chunk);
-      });
-
-      rawSocket.on('end', () => {
-        socketWrapper.push(null);
-      });
-
-      rawSocket.on('error', (err) => {
-        socketWrapper.destroy(err);
-      });
-
-      // If we have remaining data but no more data is coming, push it now
-      if (remainingData.length > 0) {
-        setImmediate(() => {
-          if (!prependedData) {
-            prependedData = true;
-            logger.debug(`Pushing ${remainingData.length} bytes immediately`);
-            socketWrapper.push(remainingData);
-          }
-        });
-      }
-
-      // Create TLS socket wrapping the wrapper stream
-      tlsSocket = new tls.TLSSocket(socketWrapper as any, {
+      // Create TLS socket wrapping the raw socket
+      // TLS will read directly from the socket - no data injection needed
+      tlsSocket = new tls.TLSSocket(rawSocket, {
         isServer: true,
         ...TLS_OPTIONS
       });
@@ -434,7 +380,7 @@ const handleConnection = (rawSocket: net.Socket) => {
     });
   } else {
     // No PROXY, setup TLS immediately
-    setupTLS(Buffer.alloc(0));
+    setupTLS();
   }
 };
 

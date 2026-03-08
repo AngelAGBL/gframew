@@ -17,12 +17,12 @@ services:
     environment:
       DOMAINS: localhost
       LANGUAGE: en
-      # PROXY: "true"  # Uncomment to enable PROXY protocol mode (v1 and v2)
-                       # Flow: TCP → PROXY header → TLS → Gemini request
-                       # Client certificates (mTLS) are fully supported
+      PROXY: "true"  # Habilitado para probar con Node.js
+                     # Flow: TCP → PROXY header → TLS → Gemini request
+                     # Client certificates (mTLS) are fully supported
     volumes:
-      - ./public:/home/bun/app/public:z
-      - ./server.crt:/home/bun/app/server.crt:z
-      - ./server.key:/home/bun/app/server.key:z
+      - ./public:/app/public:z
+      - ./server.crt:/app/server.crt:z
+      - ./server.key:/app/server.key:z
     ports:
       - 1965:1965

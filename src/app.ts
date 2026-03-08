@@ -21,6 +21,12 @@ const PROXY_ENABLED = process.env.PROXY === 'true';
 const PROXY_V1_PREFIX = 'PROXY ';
 const PROXY_V2_SIGNATURE = Buffer.from([0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A]);
 
+// Warn if using PROXY with Bun
+if (PROXY_ENABLED && typeof Bun !== 'undefined') {
+  logger.warn('⚠️  PROXY mode with Bun has known issues. Consider using Node.js instead: node src/app.ts');
+  logger.warn('⚠️  See README.md for details and alternatives');
+}
+
 // TLS options
 const TLS_OPTIONS = {
   key: fs.readFileSync('server.key'),

@@ -17,27 +17,33 @@ A dead simple gemini server-side framework written in TypeScript with Bun, featu
 
 ### Using Docker Compose (Recommended)
 
-Clone the repository and start the services:
+The default Containerfile uses Node.js for full PROXY protocol support:
 
 ```bash
 docker compose up -d
 ```
 
 This will start:
-
-- Gemini server on port 1965
+- Gemini server on port 1965 (with PROXY mode enabled)
 - MongoDB for comments storage
 
+View logs:
 ```bash
 docker compose logs -f
 ```
 
 ### Development
 
-Run the compose file
-
+For development with PROXY support (Node.js):
 ```bash
-docker compose up --build -d
+npm install
+npm run dev:node
+```
+
+For development without PROXY (Bun - faster):
+```bash
+bun install
+bun run dev
 ```
 
 ## Project Structure
@@ -125,6 +131,13 @@ Current date: {{date}}
 
 ### PROXY Protocol Mode
 
+**Runtime Compatibility**:
+- ✅ **Node.js**: Full support for PROXY protocol
+- ⚠️ **Bun**: Limited support due to TLSSocket implementation
+- ❓ **Deno**: Likely works but untested
+
+**Recommended setup**: Use Node.js when PROXY mode is needed.
+
 When `PROXY=true`, the server accepts PROXY protocol headers and extracts the real client IP, then establishes TLS with full mTLS support.
 
 Flow: `TCP → PROXY header → TLS handshake → Gemini request`
@@ -132,10 +145,10 @@ Flow: `TCP → PROXY header → TLS handshake → Gemini request`
 The server:
 1. Receives TCP connection
 2. Parses PROXY protocol header (v1 or v2) to get real client IP/port
-3. Wraps the socket with TLS
+3. Establishes TLS over the socket
 4. Processes Gemini requests with client certificate support
 
-Example with HAProxy (TLS passthrough):
+Example with HAProxy:
 
 ```haproxy
 frontend gemini_frontend
@@ -148,10 +161,14 @@ backend gemini_backend
     server gemini1 127.0.0.1:1966 send-proxy-v2
 ```
 
-Then run your Gemini server:
-
+Run with Node.js:
 ```bash
-PROXY=true bun run src/app.ts
+PROXY=true npm run start:node
+```
+
+Or with Docker (already configured):
+```bash
+docker compose up -d
 ```
 
 ### Docker Compose

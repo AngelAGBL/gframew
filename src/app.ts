@@ -12,7 +12,7 @@ await database.connect();
 
 // Gemini protocol limits: max 1024 bytes + \r\n
 const MAX_REQUEST_SIZE = 1026;
-const REQUEST_TIMEOUT = 5000; // 5 seconds
+const REQUEST_TIMEOUT = 30000; // 30 seconds - increased for slow connections
 const GEMINI_PROTOCOL = 'gemini://';
 const MIN_VALID_REQUEST_LENGTH = GEMINI_PROTOCOL.length + 1;
 
@@ -245,6 +245,7 @@ const handleConnectionWithProxy = (rawSocket: net.Socket) => {
         rawSocket.removeAllListeners('readable');
         rawSocket.removeAllListeners('timeout');
         rawSocket.removeAllListeners('error');
+        rawSocket.setTimeout(0); // Clear timeout
         
         // Calculate remaining TLS data that we read but don't need
         const tlsData = proxyBuffer.subarray(proxyHeaderLength);

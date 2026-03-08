@@ -227,29 +227,20 @@ const handleConnection = (rawSocket: net.Socket) => {
     }
 
     try {
+      // If we have remaining data, we need to unshift it back to the socket's read buffer
+      // This is the proper way to handle data that was read but needs to be processed by TLS
+      if (remainingData.length > 0 && (rawSocket as any).unshift) {
+        logger.debug(`Unshifting ${remainingData.length} bytes back to socket`);
+        (rawSocket as any).unshift(remainingData);
+      }
+
       // Create TLS socket wrapping the raw socket
       tlsSocket = new tls.TLSSocket(rawSocket, {
         isServer: true,
         ...TLS_OPTIONS
       });
 
-      logger.debug(`TLS socket created for ${realClientAddress}`);
-
-      // If we have remaining data from PROXY header parsing, push it to TLS socket
-      if (remainingData.length > 0) {
-        logger.debug(`Pushing ${remainingData.length} bytes to TLS socket`);
-        // Use internal _handle to push data if available, otherwise emit data event
-        if ((tlsSocket as any)._handle && typeof (tlsSocket as any)._handle.receive === 'function') {
-          (tlsSocket as any)._handle.receive(null, remainingData);
-        } else {
-          // Fallback: emit data event directly
-          setImmediate(() => {
-            if (!connectionClosed) {
-              tlsSocket!.emit('data', remainingData);
-            }
-          });
-        }
-      }
+      logger.debug(`TLS socket created for ${realClientAddress}, waiting for secure connection...`);
 
       // Handle TLS errors
       tlsSocket.on('error', (error) => {
@@ -259,12 +250,21 @@ const handleConnection = (rawSocket: net.Socket) => {
         }
       });
 
-      tlsSocket.on('secureConnect', () => {
+      // Wait for TLS handshake to complete before processing Gemini protocol
+      tlsSocket.once('secureConnect', () => {
         logger.info(`✓ TLS handshake completed for ${realClientAddress}`);
+        // Now start processing Gemini protocol
+        handleGeminiProtocol(tlsSocket!, realClientAddress);
       });
 
-      // Start processing Gemini protocol
-      handleGeminiProtocol(tlsSocket, realClientAddress);
+      // Set timeout for TLS handshake
+      tlsSocket.setTimeout(REQUEST_TIMEOUT, () => {
+        if (!connectionClosed) {
+          logger.warn(`TLS handshake timeout from ${realClientAddress}`);
+          closeConnection();
+        }
+      });
+
     } catch (error) {
       logger.error(`Failed to setup TLS for ${realClientAddress}: ${error}`);
       closeConnection();

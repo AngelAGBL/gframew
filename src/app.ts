@@ -14,7 +14,7 @@ await database.connect();
 const MAX_REQUEST_SIZE = 1026;
 const REQUEST_TIMEOUT = 5000; // 5 seconds
 const GEMINI_PROTOCOL = 'gemini://';
-const MIN_VALID_REQUEST_LENGTH = GEMINI_PROTOCOL.length + 1; // gemini:// + at least 1 char
+const MIN_VALID_REQUEST_LENGTH = GEMINI_PROTOCOL.length + 1;
 
 // PROXY protocol support
 const PROXY_ENABLED = process.env.PROXY === 'true';
@@ -37,10 +37,8 @@ interface ProxyInfo {
 }
 
 const parseProxyV1Header = (line: string): ProxyInfo | null => {
-  // PROXY TCP4/TCP6 srcIP dstIP srcPort dstPort\r\n
   const parts = line.split(' ');
   if (parts.length !== 6 || parts[0] !== 'PROXY') return null;
-  
   return {
     srcAddress: parts[2],
     srcPort: parseInt(parts[4]),
@@ -51,368 +49,211 @@ const parseProxyV1Header = (line: string): ProxyInfo | null => {
 
 const parseProxyV2Header = (buffer: Buffer): { info: ProxyInfo | null; headerLength: number } => {
   if (buffer.length < 16) return { info: null, headerLength: 0 };
-  
-  // Verify signature
-  if (!buffer.subarray(0, 12).equals(PROXY_V2_SIGNATURE)) {
-    return { info: null, headerLength: 0 };
-  }
+  if (!buffer.subarray(0, 12).equals(PROXY_V2_SIGNATURE)) return { info: null, headerLength: 0 };
   
   const verCmd = buffer[12];
   const famProto = buffer[13];
   const len = buffer.readUInt16BE(14);
-  
   const headerLength = 16 + len;
-  if (buffer.length < headerLength) return { info: null, headerLength: 0 };
   
-  // Check if it's a PROXY command (not LOCAL)
+  if (buffer.length < headerLength) return { info: null, headerLength: 0 };
   if ((verCmd & 0x0F) !== 0x01) return { info: null, headerLength };
   
-  // Parse addresses based on family
   const family = (famProto & 0xF0) >> 4;
   let info: ProxyInfo | null = null;
   
-  if (family === 0x01) { // IPv4
-    const srcAddress = `${buffer[16]}.${buffer[17]}.${buffer[18]}.${buffer[19]}`;
-    const dstAddress = `${buffer[20]}.${buffer[21]}.${buffer[22]}.${buffer[23]}`;
-    const srcPort = buffer.readUInt16BE(24);
-    const dstPort = buffer.readUInt16BE(26);
-    info = { srcAddress, srcPort, dstAddress, dstPort };
-  } else if (family === 0x02) { // IPv6
-    const srcAddress = buffer.subarray(16, 32).toString('hex').match(/.{1,4}/g)?.join(':') || '';
-    const dstAddress = buffer.subarray(32, 48).toString('hex').match(/.{1,4}/g)?.join(':') || '';
-    const srcPort = buffer.readUInt16BE(48);
-    const dstPort = buffer.readUInt16BE(50);
-    info = { srcAddress, srcPort, dstAddress, dstPort };
+  if (family === 0x01) {
+    info = {
+      srcAddress: `${buffer[16]}.${buffer[17]}.${buffer[18]}.${buffer[19]}`,
+      dstAddress: `${buffer[20]}.${buffer[21]}.${buffer[22]}.${buffer[23]}`,
+      srcPort: buffer.readUInt16BE(24),
+      dstPort: buffer.readUInt16BE(26)
+    };
+  } else if (family === 0x02) {
+    info = {
+      srcAddress: buffer.subarray(16, 32).toString('hex').match(/.{1,4}/g)?.join(':') || '',
+      dstAddress: buffer.subarray(32, 48).toString('hex').match(/.{1,4}/g)?.join(':') || '',
+      srcPort: buffer.readUInt16BE(48),
+      dstPort: buffer.readUInt16BE(50)
+    };
   }
   
   return { info, headerLength };
 };
 
-const handleConnection = (rawSocket: net.Socket) => {
-  let proxyHeaderLength = 0;
+// Handle TLS socket (common for both modes)
+const handleTLSSocket = (socket: tls.TLSSocket, clientAddress: string) => {
+  let buffer = Buffer.alloc(0);
+  let requestComplete = false;
+  let validationFailed = false;
+  let handshakeComplete = false;
+
+  const cleanup = () => {
+    socket.removeAllListeners();
+  };
+
+  const rejectRequest = (message: string) => {
+    if (validationFailed || requestComplete) return;
+    validationFailed = true;
+    logger.warn(`${message} from ${clientAddress}`);
+    try { if (socket.writable) socket.write(`59 Bad Request: ${message}\r\n`); } catch (e) {}
+    try { socket.destroy(); } catch (e) {}
+    cleanup();
+  };
+
+  socket.on('secureConnect', () => {
+    handshakeComplete = true;
+    logger.info(`✓ TLS established for ${clientAddress}`);
+  });
+
+  socket.on('data', (chunk: Buffer) => {
+    if (requestComplete || validationFailed || !handshakeComplete) return;
+
+    buffer = Buffer.concat([buffer, chunk]);
+    if (buffer.length > MAX_REQUEST_SIZE) {
+      rejectRequest('Request too long');
+      return;
+    }
+
+    const validationError = validateRequestBuffer(buffer);
+    if (validationError) {
+      rejectRequest(validationError);
+      return;
+    }
+
+    const requestStr = buffer.toString('utf-8');
+    if (requestStr.includes('\r\n')) {
+      requestComplete = true;
+      cleanup();
+      const requestLine = requestStr.split('\r\n')[0];
+      if (requestLine.length < MIN_VALID_REQUEST_LENGTH) {
+        rejectRequest('Invalid URL format');
+        return;
+      }
+      handleRequest(socket, requestLine);
+    }
+  });
+
+  socket.on('end', () => {
+    if (!requestComplete && !validationFailed && buffer.length > 0) {
+      logger.warn(`Client closed connection with incomplete request from ${clientAddress}`);
+    }
+    cleanup();
+  });
+
+  socket.on('close', () => cleanup());
+  socket.setTimeout(REQUEST_TIMEOUT, () => {
+    if (!requestComplete && !validationFailed) rejectRequest('Timeout');
+  });
+  socket.on('error', (error) => {
+    if (!validationFailed && !requestComplete) {
+      logger.error(`Socket error from ${clientAddress}: ${error.message}`);
+    }
+    cleanup();
+  });
+};
+
+// Handle connection with PROXY protocol
+const handleConnectionWithProxy = (rawSocket: net.Socket) => {
+  let dataBuffer = Buffer.alloc(0);
   let proxyParsed = false;
   let realClientAddress = rawSocket.remoteAddress || 'unknown';
-  let realClientPort = rawSocket.remotePort || 0;
-  let tlsSocket: tls.TLSSocket | null = null;
   let connectionClosed = false;
-  let dataBuffer = Buffer.alloc(0);
 
   const closeConnection = (message?: string) => {
     if (connectionClosed) return;
     connectionClosed = true;
-    
-    if (message) {
-      logger.warn(`${message} from ${realClientAddress}`);
-    }
-    
-    try {
-      if (tlsSocket) {
-        tlsSocket.destroy();
-      } else {
-        rawSocket.destroy();
-      }
-    } catch (error) {
-      // Ignore errors during cleanup
-      logger.debug(`Error closing connection: ${error}`);
-    }
+    if (message) logger.warn(`${message} from ${realClientAddress}`);
+    try { rawSocket.destroy(); } catch (e) {}
   };
 
-  const proxyTimeoutHandler = () => {
-    if (!connectionClosed && !proxyParsed) {
-      closeConnection('Timeout waiting for PROXY header');
-    }
-  };
-
-  const parseProxyHeader = () => {
-    // Try to detect PROXY protocol version
+  const handleData = (chunk: Buffer) => {
+    if (connectionClosed || proxyParsed) return;
+    dataBuffer = Buffer.concat([dataBuffer, chunk]);
+    
+    let proxyHeaderLength = 0;
+    let proxyInfo: ProxyInfo | null = null;
+    
+    // Try PROXY v2
     if (dataBuffer.length >= PROXY_V2_SIGNATURE.length && 
         dataBuffer.subarray(0, PROXY_V2_SIGNATURE.length).equals(PROXY_V2_SIGNATURE)) {
-      // PROXY v2
-      const { info, headerLength } = parseProxyV2Header(dataBuffer);
-      
-      if (headerLength === 0) {
-        if (dataBuffer.length > 512) {
-          closeConnection('Invalid PROXY v2 header');
-          return false;
-        }
-        return false; // Need more data
+      const result = parseProxyV2Header(dataBuffer);
+      if (result.headerLength === 0) {
+        if (dataBuffer.length > 512) closeConnection('Invalid PROXY v2 header');
+        return;
       }
-      
-      proxyHeaderLength = headerLength;
-      if (info) {
-        realClientAddress = info.srcAddress;
-        realClientPort = info.srcPort;
-        logger.debug(`PROXY v2: Real client ${realClientAddress}:${realClientPort}`);
-      }
-      return true;
-      
-    } else if (dataBuffer.toString('utf-8', 0, Math.min(6, dataBuffer.length)).startsWith(PROXY_V1_PREFIX)) {
-      // PROXY v1
+      proxyHeaderLength = result.headerLength;
+      proxyInfo = result.info;
+    }
+    // Try PROXY v1
+    else if (dataBuffer.toString('utf-8', 0, Math.min(6, dataBuffer.length)).startsWith(PROXY_V1_PREFIX)) {
       const bufferStr = dataBuffer.toString('utf-8');
       const crlfIndex = bufferStr.indexOf('\r\n');
-      
       if (crlfIndex === -1) {
-        if (dataBuffer.length > 108) {
-          closeConnection('Invalid PROXY v1 header');
-          return false;
-        }
-        return false; // Need more data
+        if (dataBuffer.length > 108) closeConnection('Invalid PROXY v1 header');
+        return;
       }
-      
       proxyHeaderLength = crlfIndex + 2;
-      const proxyLine = bufferStr.substring(0, crlfIndex);
-      const info = parseProxyV1Header(proxyLine);
-      
-      if (info) {
-        realClientAddress = info.srcAddress;
-        realClientPort = info.srcPort;
-        logger.debug(`PROXY v1: Real client ${realClientAddress}:${realClientPort}`);
-      }
-      return true;
-      
-    } else if (dataBuffer.length >= 6) {
+      proxyInfo = parseProxyV1Header(bufferStr.substring(0, crlfIndex));
+    }
+    // Not PROXY
+    else if (dataBuffer.length >= 6) {
       closeConnection('Expected PROXY protocol header');
-      return false;
+      return;
+    } else {
+      return; // Need more data
     }
     
-    return false; // Need more data
+    // PROXY header parsed
+    proxyParsed = true;
+    if (proxyInfo) {
+      realClientAddress = proxyInfo.srcAddress;
+      logger.info(`PROXY: Real client ${realClientAddress}:${proxyInfo.srcPort}`);
+    }
+    
+    // Remove handler
+    rawSocket.removeAllListeners();
+    
+    // Get TLS data
+    const tlsData = dataBuffer.subarray(proxyHeaderLength);
+    logger.debug(`PROXY parsed, TLS data: ${tlsData.length} bytes`);
+    
+    // Create TLS socket
+    const tlsSocket = new tls.TLSSocket(rawSocket, {
+      isServer: true,
+      ...TLS_OPTIONS
+    });
+    
+    // Feed TLS data using internal API
+    if (tlsData.length > 0) {
+      setImmediate(() => {
+        if ((tlsSocket as any)._handle && (tlsSocket as any)._handle.onread) {
+          (tlsSocket as any)._handle.onread(tlsData.length, tlsData);
+        }
+      });
+    }
+    
+    handleTLSSocket(tlsSocket, realClientAddress);
   };
 
-  const handleProxyData = (chunk: Buffer) => {
-    if (connectionClosed || proxyParsed) return;
-    
-    dataBuffer = Buffer.concat([dataBuffer, chunk]);
-    logger.debug(`Received ${chunk.length} bytes, total: ${dataBuffer.length} bytes`);
-    
-    if (parseProxyHeader()) {
-      proxyParsed = true;
-      logger.info(`PROXY header parsed (${proxyHeaderLength} bytes), total received: ${dataBuffer.length} bytes`);
-      
-      // Remove the data handler - critical!
-      rawSocket.removeListener('data', handleProxyData);
-      rawSocket.removeListener('timeout', proxyTimeoutHandler);
-      rawSocket.setTimeout(0);
-      
-      // Now we need to "put back" the data after the PROXY header
-      // The trick: use rawSocket.unshift() if available, or pause/resume
-      const remainingData = dataBuffer.subarray(proxyHeaderLength);
-      
-      if (remainingData.length > 0) {
-        logger.info(`Putting back ${remainingData.length} bytes to socket`);
-        
-        // Try Node.js unshift method
-        if (typeof (rawSocket as any).unshift === 'function') {
-          (rawSocket as any).unshift(remainingData);
-          logger.debug('Used unshift() to return data');
-        } else {
-          // Fallback: manually emit the data after TLS is set up
-          logger.debug('Will manually feed data to TLS');
-          setImmediate(() => {
-            if (tlsSocket && !connectionClosed) {
-              // Emit data event on the raw socket so TLS can read it
-              rawSocket.emit('data', remainingData);
-            }
-          });
-        }
-      }
-      
-      setupTLS();
-    }
-  };
-
-  const setupTLS = () => {
-    if (connectionClosed) {
-      logger.debug(`Connection already closed, skipping TLS setup for ${realClientAddress}`);
-      return;
-    }
-
-    logger.info(`Setting up TLS for ${realClientAddress}`);
-
-    // Remove proxy data handler and timeout
-    rawSocket.removeListener('data', handleProxyData);
-    rawSocket.removeListener('timeout', proxyTimeoutHandler);
-    rawSocket.setTimeout(0); // Clear timeout
-
-    // Check if socket is still valid
-    if (!rawSocket.readable || rawSocket.destroyed) {
-      logger.debug(`Socket no longer valid for TLS setup from ${realClientAddress}`);
-      connectionClosed = true;
-      return;
-    }
-
-    try {
-      // Create TLS socket wrapping the raw socket
-      // TLS will read directly from the socket - no data injection needed
-      tlsSocket = new tls.TLSSocket(rawSocket, {
-        isServer: true,
-        ...TLS_OPTIONS
-      });
-
-      logger.debug(`TLS socket created for ${realClientAddress}, waiting for secure connection...`);
-
-      // Handle TLS errors
-      tlsSocket.on('error', (error) => {
-        if (!connectionClosed) {
-          logger.error(`TLS error from ${realClientAddress}: ${error.message}`);
-          closeConnection();
-        }
-      });
-
-      // Wait for TLS handshake to complete before processing Gemini protocol
-      tlsSocket.once('secureConnect', () => {
-        logger.info(`✓ TLS handshake completed for ${realClientAddress}`);
-        // Now start processing Gemini protocol
-        handleGeminiProtocol(tlsSocket!, realClientAddress);
-      });
-
-      // Set timeout for TLS handshake
-      tlsSocket.setTimeout(REQUEST_TIMEOUT, () => {
-        if (!connectionClosed) {
-          logger.warn(`TLS handshake timeout from ${realClientAddress}`);
-          closeConnection();
-        }
-      });
-
-    } catch (error) {
-      logger.error(`Failed to setup TLS for ${realClientAddress}: ${error}`);
+  rawSocket.on('data', handleData);
+  rawSocket.setTimeout(REQUEST_TIMEOUT, () => {
+    if (!proxyParsed) closeConnection('Timeout waiting for PROXY header');
+  });
+  rawSocket.on('error', (error) => {
+    if (!connectionClosed) {
+      logger.error(`Socket error from ${realClientAddress}: ${error.message}`);
       closeConnection();
     }
-  };
-
-  const handleGeminiProtocol = (socket: tls.TLSSocket, clientAddress: string) => {
-    let buffer = Buffer.alloc(0);
-    let requestComplete = false;
-    let validationFailed = false;
-
-    const cleanup = () => {
-      socket.removeAllListeners('data');
-      socket.removeAllListeners('end');
-      socket.removeAllListeners('close');
-      socket.removeAllListeners('timeout');
-    };
-
-    const rejectRequest = (message: string) => {
-      if (validationFailed || requestComplete) return;
-      validationFailed = true;
-      logger.warn(`${message} from ${clientAddress}`);
-      
-      try {
-        if (socket.writable) {
-          socket.write(`59 Bad Request: ${message}\r\n`);
-        }
-      } catch (error) {
-        logger.debug(`Could not write error message: ${error}`);
-      }
-      
-      try {
-        socket.destroy();
-      } catch (error) {
-        logger.debug(`Error destroying socket: ${error}`);
-      }
-      
-      cleanup();
-    };
-
-    const timeoutHandler = () => {
-      if (!requestComplete && !validationFailed) {
-        rejectRequest('Timeout');
-      }
-    };
-
-    const endHandler = () => {
-      if (!requestComplete && !validationFailed) {
-        if (buffer.length > 0) {
-          logger.warn(`Client closed connection with incomplete request from ${clientAddress}`);
-          try {
-            if (socket.writable) {
-              socket.write('59 Bad Request: Incomplete request\r\n');
-            }
-          } catch (error) {
-            logger.debug(`Could not write error message: ${error}`);
-          }
-          validationFailed = true;
-        }
-        cleanup();
-        try {
-          socket.end();
-        } catch (error) {
-          logger.debug(`Error ending socket: ${error}`);
-        }
-      }
-    };
-
-    const closeHandler = () => {
-      if (!requestComplete && !validationFailed && buffer.length > 0) {
-        logger.warn(`Connection closed unexpectedly from ${clientAddress}`);
-      }
-      cleanup();
-    };
-
-    const dataHandler = (chunk: Buffer) => {
-      if (requestComplete || validationFailed) return;
-
-      buffer = Buffer.concat([buffer, chunk]);
-
-      if (buffer.length > MAX_REQUEST_SIZE) {
-        rejectRequest('Request too long');
-        return;
-      }
-
-      const validationError = validateRequestBuffer(buffer);
-      if (validationError) {
-        rejectRequest(validationError);
-        return;
-      }
-
-      const requestStr = buffer.toString('utf-8');
-      if (requestStr.includes('\r\n')) {
-        requestComplete = true;
-        cleanup();
-
-        const requestLine = requestStr.split('\r\n')[0];
-
-        if (requestLine.length < MIN_VALID_REQUEST_LENGTH) {
-          rejectRequest('Invalid URL format');
-          return;
-        }
-
-        handleRequest(socket, requestLine);
-      }
-    };
-
-    socket.on('data', dataHandler);
-    socket.on('end', endHandler);
-    socket.on('close', closeHandler);
-    socket.setTimeout(REQUEST_TIMEOUT, timeoutHandler);
-
-    socket.on('error', (error) => {
-      if (!validationFailed && !requestComplete) {
-        logger.error(`Socket error from ${clientAddress}: ${error.message}`);
-      }
-      cleanup();
-    });
-  };
-
-  // Start processing based on PROXY mode
-  if (PROXY_ENABLED) {
-    // Wait for PROXY header first
-    rawSocket.on('data', handleProxyData);
-    rawSocket.setTimeout(REQUEST_TIMEOUT, proxyTimeoutHandler);
-    
-    rawSocket.on('error', (error) => {
-      if (!connectionClosed) {
-        logger.error(`Raw socket error from ${realClientAddress}: ${error.message}`);
-        closeConnection();
-      }
-    });
-  } else {
-    // No PROXY, setup TLS immediately
-    setupTLS();
-  }
+  });
 };
 
-// Create single TCP server
-const server = net.createServer(handleConnection);
+// Create server
+const server = PROXY_ENABLED
+  ? net.createServer(handleConnectionWithProxy)
+  : tls.createServer(TLS_OPTIONS, (socket) => {
+      handleTLSSocket(socket, socket.remoteAddress || 'unknown');
+    });
 
 server.listen(config.port);
 logger.info(`🚀 Gemini server started on port ${config.port} (PROXY: ${PROXY_ENABLED ? 'enabled' : 'disabled'})`);

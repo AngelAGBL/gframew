@@ -33,6 +33,15 @@ export async function handleRequest(socket: Socket | TLSSocket, data: Buffer | s
     }
 
     logger.info(`Requested: ${url}, from: ${socket.remoteAddress}`);
+    
+    // Block direct access to files starting with +
+    const pathParts = pathname.split('/').filter(p => p);
+    if (pathParts.some(part => part.startsWith('+'))) {
+      socket.write('51 Not Found\r\n');
+      socket.end();
+      return;
+    }
+    
     // Try dynamic route first, then static file
     if (await serveDynamicRoute(socket, pathname, input)) {}
     else if (await serveStaticFile(socket, pathname, input)) {}

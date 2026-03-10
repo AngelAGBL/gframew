@@ -4,46 +4,52 @@
  */
 export function detectCharset(buffer: Buffer, mimeType: string): string | null {
   // Only detect charset for text types
-  if (!mimeType.startsWith('text/')) {
+  if (!(
+    mimeType.startsWith('text/') ||
+    mimeType === 'application/xml' ||
+    mimeType === 'application/json' ||
+    mimeType === 'application/javascript' ||
+    mimeType === 'application/typescript'
+  )) {
     return null;
   }
 
   // Check for UTF-8 BOM
-  if (buffer.length >= 3 && 
-      buffer[0] === 0xEF && 
-      buffer[1] === 0xBB && 
+  if (buffer.length >= 3 &&
+      buffer[0] === 0xEF &&
+      buffer[1] === 0xBB &&
       buffer[2] === 0xBF) {
     return 'utf-8';
   }
 
   // Check for UTF-16 BE BOM
-  if (buffer.length >= 2 && 
-      buffer[0] === 0xFE && 
+  if (buffer.length >= 2 &&
+      buffer[0] === 0xFE &&
       buffer[1] === 0xFF) {
     return 'utf-16be';
   }
 
   // Check for UTF-16 LE BOM
-  if (buffer.length >= 2 && 
-      buffer[0] === 0xFF && 
+  if (buffer.length >= 2 &&
+      buffer[0] === 0xFF &&
       buffer[1] === 0xFE) {
     return 'utf-16le';
   }
 
   // Check for UTF-32 BE BOM
-  if (buffer.length >= 4 && 
-      buffer[0] === 0x00 && 
-      buffer[1] === 0x00 && 
-      buffer[2] === 0xFE && 
+  if (buffer.length >= 4 &&
+      buffer[0] === 0x00 &&
+      buffer[1] === 0x00 &&
+      buffer[2] === 0xFE &&
       buffer[3] === 0xFF) {
     return 'utf-32be';
   }
 
   // Check for UTF-32 LE BOM
-  if (buffer.length >= 4 && 
-      buffer[0] === 0xFF && 
-      buffer[1] === 0xFE && 
-      buffer[2] === 0x00 && 
+  if (buffer.length >= 4 &&
+      buffer[0] === 0xFF &&
+      buffer[1] === 0xFE &&
+      buffer[2] === 0x00 &&
       buffer[3] === 0x00) {
     return 'utf-32le';
   }
@@ -77,7 +83,7 @@ export function detectCharset(buffer: Buffer, mimeType: string): string | null {
   // ISO-8859-1 uses bytes 0x80-0xFF for extended characters
   let hasExtendedChars = false;
   let hasInvalidIsoChars = false;
-  
+
   for (let i = 0; i < Math.min(buffer.length, 1024); i++) {
     const byte = buffer[i];
     if (byte !== undefined && byte >= 0x80 && byte <= 0xFF) {

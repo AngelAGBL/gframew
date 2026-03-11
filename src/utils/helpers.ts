@@ -138,68 +138,16 @@ export function registerHandlebarsHelpers(): void {
       const baseDir = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../public');
       const links: Array<{ url: string; name: string; ctime: Date }> = [];
 
-      for (const input of inputs) {
-        if (!input || typeof input !== 'string') continue;
-
-        // Check if it's a directory (ends with /)
-        if (input.endsWith('/')) {
-          const dirPath = path.resolve(baseDir, input);
-          
-          if (fs.existsSync(dirPath) && fs.statSync(dirPath).isDirectory()) {
-            const files = fs.readdirSync(dirPath)
-              .filter(file => file.endsWith('.gmi') && file !== 'index.gmi')
-              .map(file => {
-                const fullPath = path.join(dirPath, file);
-                const stats = fs.statSync(fullPath);
-                const url = '/' + path.join(input, file).replace(/\\/g, '/');
-                const name = file.replace(/\.gmi$/, '');
-                
-                return { url, name, ctime: stats.birthtime };
-              });
-            
-            links.push(...files);
-          }
+      for (const pair of inputs) {
+        const [url, name] = pair.split(',').map(s => s.trim());
+        if (!url || !name) continue;
+        let ctime = new Date(0);
+        const filePath = path.resolve(baseDir, url.startsWith('/') ? url.slice(1) : url);
+        if (fs.existsSync(filePath)) {
+          const stats = fs.statSync(filePath);
+          ctime = stats.birthtime;
         }
-        // Check if it's legacy format (contains /)
-        else if (input.includes('/') && !input.startsWith('/')) {
-          const linkPairs = input.split('/').map(s => s.trim()).filter(s => s);
-          
-          for (const pair of linkPairs) {
-            const [url, name] = pair.split(',').map(s => s.trim());
-            if (!url || !name) continue;
-            
-            let ctime = new Date(0);
-            try {
-              const filePath = path.resolve(baseDir, url.startsWith('/') ? url.slice(1) : url);
-              if (fs.existsSync(filePath)) {
-                const stats = fs.statSync(filePath);
-                ctime = stats.birthtime;
-              }
-            } catch (error) {
-              // Use epoch time if file doesn't exist
-            }
-            
-            links.push({ url, name, ctime });
-          }
-        }
-        // Individual file format: "url,name"
-        else {
-          const [url, name] = input.split(',').map((s: string) => s.trim());
-          if (!url || !name) continue;
-          
-          let ctime = new Date(0);
-          try {
-            const filePath = path.resolve(baseDir, url.startsWith('/') ? url.slice(1) : url);
-            if (fs.existsSync(filePath)) {
-              const stats = fs.statSync(filePath);
-              ctime = stats.birthtime;
-            }
-          } catch (error) {
-            // Use epoch time if file doesn't exist
-          }
-          
-          links.push({ url, name, ctime });
-        }
+        links.push({ url, name, ctime });
       }
 
       // Sort by creation time (newest first)

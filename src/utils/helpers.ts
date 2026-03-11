@@ -154,7 +154,11 @@ export function registerHandlebarsHelpers(): void {
       links.sort((a, b) => b.ctime.getTime() - a.ctime.getTime());
 
       // Generate Gemini links
-      const result = links.map(link => `=> ${link.url} ${link.name}`).join('\n');
+      const result = links.map(
+        link => `=> ${link.url} ${link.name} (${
+          fs.statSync(path.resolve(baseDir, link.url.startsWith('/') ? link.url.slice(1) : link.url)).mtime.toDateString()
+        })`
+      ).join('\n');
       
       return new Handlebars.SafeString(result);
     } catch (error) {

@@ -7,7 +7,7 @@ import logger from '../config/logger.ts';
 import { config } from '../config/server.ts';
 import { getMimeType } from '../utils/mime.ts';
 import { detectCharset } from '../utils/charset.ts';
-import { registerHandlebarsHelpers } from '../utils/styles.ts';
+import { registerHandlebarsHelpers } from '../utils/helpers.ts';
 import { getComments, addComment, formatComments } from '../services/comments.ts';
 
 // Register helpers once when module loads

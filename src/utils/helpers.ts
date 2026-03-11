@@ -139,7 +139,7 @@ export function registerHandlebarsHelpers(): void {
       const links: Array<{ url: string; name: string; ctime: Date }> = [];
 
       for (const pair of inputs) {
-        const [url, name] = pair.split(',').map(s => s.trim());
+        const [url, name] = pair.split(',').map((s: string) => s.trim());
         if (!url || !name) continue;
         let ctime = new Date(0);
         const filePath = path.resolve(baseDir, url.startsWith('/') ? url.slice(1) : url);
@@ -222,7 +222,9 @@ export function registerHandlebarsHelpers(): void {
         });
 
       // Generate Gemini links
-      const result = files.map(file => `=> ${file.url} ${file.name}`).join('\n');
+      const result = files.map(file => `=> ${file.url} ${file.name} ${
+        fs.statSync(path.resolve(baseDir, file.url.startsWith('/') ? file.url.slice(1) : file.url)).birthtime.toDateString()
+      }`).join('\n');
       
       return new Handlebars.SafeString(result);
     } catch (error) {

@@ -145,7 +145,7 @@ export function registerHandlebarsHelpers(): void {
         const filePath = path.resolve(baseDir, url.startsWith('/') ? url.slice(1) : url);
         if (fs.existsSync(filePath)) {
           const stats = fs.statSync(filePath);
-          ctime = stats.birthtime;
+          ctime = stats.mtime;
         }
         links.push({ url, name, ctime });
       }

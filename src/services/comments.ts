@@ -37,7 +37,7 @@ export async function addComment(
 
 export function formatComments(comments: Comment[]): string {
   if (!comments || comments.length === 0) {
-    return '## Comentarios\n=> ?input Escribe tu comentario\nNo hay comentarios aún.\n';
+    return '\nNo hay comentarios aún.\n';
   }
   
   const formatDate = (date: Date): string => {

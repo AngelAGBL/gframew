@@ -1,10 +1,11 @@
 import { config } from '../config/server.ts';
 
 /**
- * Validates if the domain is allowed.
+ * Validates if the domain is allowed (case-insensitive).
  */
 export function isAllowedDomain(hostname: string): boolean {
-  return config.allowedDomains.includes(hostname);
+  const host = hostname.toLowerCase();
+  return config.allowedDomains.some((d) => d.toLowerCase() === host);
 }
 
 

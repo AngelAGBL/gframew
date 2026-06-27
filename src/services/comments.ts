@@ -1,6 +1,13 @@
 import { database, type Comment } from '../config/database.ts';
 import logger from '../config/logger.ts';
 
+/**
+ * Neutralizes control characters (notably CR/LF) so stored values cannot inject
+ * extra gemtext lines when rendered unescaped via `{{{comments}}}`.
+ */
+const sanitize = (text: string): string =>
+  text.replace(/[\u0000-\u001F\u007F]/g, ' ').trim();
+
 export async function getComments(filePath: string): Promise<Comment[]> {
   try {
     const collection = database.getCommentsCollection();
@@ -23,11 +30,11 @@ export async function addComment(
     const collection = database.getCommentsCollection();
     await collection.insertOne({
       filePath,
-      username,
-      comment,
+      username: sanitize(username),
+      comment: sanitize(comment),
       timestamp: new Date()
     });
-    logger.info(`Comment added for ${filePath} by ${username}`);
+    logger.info(`Comment added for ${filePath} by ${sanitize(username)}`);
     return true;
   } catch (error) {
     logger.error(`Error adding comment: ${error}`);
@@ -56,8 +63,9 @@ export function formatComments(comments: Comment[]): string {
   let result = '';
   for (const comment of comments) {
     const date = formatDate(comment.timestamp);
-    result += `\n👤 ${comment.username} - ${date}\n`;
-    result += `> ${comment.comment}\n`;
+    // Sanitize again at render time to also neutralize any legacy data.
+    result += `\n👤 ${sanitize(comment.username)} - ${date}\n`;
+    result += `> ${sanitize(comment.comment)}\n`;
   }
   return result;
 }

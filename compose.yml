@@ -16,7 +16,8 @@ services:
       - mongo
     environment:
       DOMAINS: localhost
-      LANGUAGE: en
+      LANGUAGE: es
+      LOG_TIMEZONE: America/Mexico_City
       # PROXY: "true"  # Habilitado para probar con Node.js
                       # Flow: TCP → PROXY header → TLS → Gemini request
                       # Client certificates (mTLS) are fully supported

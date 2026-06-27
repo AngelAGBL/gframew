@@ -1,55 +1,64 @@
-import path from 'path';
-import type { TLSSocket } from 'tls';
-import type { Socket } from 'net';
 import logger from '../config/logger.ts';
+import { MAX_HOSTNAME_LENGTH, StatusCode } from '../constants.ts';
 import { isAllowedDomain } from '../utils/validation.ts';
 import { serveStaticFile } from './static.ts';
 import { serveDynamicRoute } from './dynamic.ts';
+import type { GeminiSocket } from '../types.ts';
 
 /**
- * Handles incoming Gemini protocol requests.
+ * Handles an incoming Gemini protocol request: validates the URL, enforces
+ * domain/path policy, and dispatches to a dynamic route or static file.
+ *
+ * @param clientAddress The real client address (resolved from PROXY when used).
  */
-export async function handleRequest(socket: Socket | TLSSocket, data: Buffer | string): Promise<void> {
+export async function handleRequest(
+  socket: GeminiSocket,
+  data: Buffer | string,
+  clientAddress: string = socket.remoteAddress ?? 'unknown'
+): Promise<void> {
   try {
-    // Hey you, URL class already normalizes the path
-    // so we don't need to do it never (Anti path traversal)
-    const url      = new URL(data.toString().trim());
+    // The URL class normalizes the path for us, which also guards against
+    // path traversal — no manual normalization needed.
+    const url = new URL(data.toString().trim());
     const hostname = url.hostname;
     const pathname = url.pathname.slice(1);
-    const input    = url.search.slice(1);
+    const input = url.search.slice(1);
 
-    if (hostname.length > 255) {
-      socket.write('59 Bad Request: Hostname too long\r\n');
-      logger.error(`Rejected domain: ${url}`);
-      socket.end();
+    if (hostname.length > MAX_HOSTNAME_LENGTH) {
+      socket.write(`${StatusCode.BAD_REQUEST} Bad Request: Hostname too long\r\n`);
+      logger.error(`Rejected hostname (too long): ${url}`);
       return;
     }
 
     if (!isAllowedDomain(hostname)) {
-      socket.write('53 Proxy request refused\r\n');
+      socket.write(`${StatusCode.PROXY_REQUEST_REFUSED} Proxy request refused\r\n`);
       logger.error(`Rejected domain: ${url}`);
-      socket.end();
       return;
     }
 
-    logger.info(`Requested: ${url}, from: ${socket.remoteAddress}`);
-    
-    // Block direct access to files starting with +
-    const pathParts = pathname.split('/').filter(p => p);
-    if (pathParts.some(part => part.startsWith('+'))) {
-      socket.write('51 Not Found\r\n');
-      socket.end();
+    logger.info(`Requested: ${url}, from: ${clientAddress}`);
+
+    // Reserved files are never served directly:
+    //  - `+name` route sources (modules/scripts)
+    //  - dotfiles (e.g. `.styles.ts`)
+    const pathParts = pathname.split('/').filter((p) => p);
+    if (pathParts.some((part) => part.startsWith('+') || part.startsWith('.'))) {
+      socket.write(`${StatusCode.NOT_FOUND} Not Found\r\n`);
       return;
     }
-    
-    // Try dynamic route first, then static file
-    if (await serveDynamicRoute(socket, pathname, input)) {}
-    else if (await serveStaticFile(socket, pathname, input)) {}
-    else {socket.write('51 Not Found\r\n'); logger.warn(`Not found: ${pathname}`);}
+
+    // Dynamic routes take precedence over static files.
+    const served =
+      (await serveDynamicRoute(socket, pathname, input)) ||
+      (await serveStaticFile(socket, pathname, input));
+
+    if (!served) {
+      socket.write(`${StatusCode.NOT_FOUND} Not Found\r\n`);
+      logger.warn(`Not found: ${pathname}`);
+    }
   } catch (error) {
     logger.error(`Error processing request: ${error}`);
   } finally {
     socket.end();
-    return;
   }
 }

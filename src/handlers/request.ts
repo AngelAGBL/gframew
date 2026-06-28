@@ -21,7 +21,9 @@ export async function handleRequest(
     // path traversal — no manual normalization needed.
     const url = new URL(data.toString().trim());
     const hostname = url.hostname;
-    const pathname = url.pathname.slice(1);
+    // Strip all leading slashes: `//` would otherwise leave an absolute path
+    // (e.g. `/index.gmi`), escaping the public dir on resolve and 404-ing.
+    const pathname = url.pathname.replace(/^\/+/, '');
     const input = url.search.slice(1);
 
     if (hostname.length > MAX_HOSTNAME_LENGTH) {

@@ -42,9 +42,12 @@ export async function handleRequest(
 
     // Reserved files are never served directly:
     //  - `+name` route sources (modules/scripts)
-    //  - dotfiles (e.g. `.styles.ts`)
+    //  - the `.styles` / `.matchers` config modules
+    // Other dotfiles (e.g. `.well-known/...`) are served normally.
     const pathParts = pathname.split('/').filter((p) => p);
-    if (pathParts.some((part) => part.startsWith('+') || part.startsWith('.'))) {
+    const isReserved = (part: string) =>
+      part.startsWith('+') || /^\.(styles|matchers)\.(ts|js|mjs)$/.test(part);
+    if (pathParts.some(isReserved)) {
       socket.write(`${StatusCode.NOT_FOUND} Not Found\r\n`);
       return;
     }

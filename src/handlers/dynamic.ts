@@ -20,15 +20,20 @@ const fileModTimes = new Map<string, number>();
  */
 async function loadRouteHandler(fullPath: string): Promise<DynamicRouteHandler | null> {
   const currentMtime = fs.statSync(fullPath).mtimeMs;
-  let moduleUrl = fullPath;
+  const knownMtime = fileModTimes.get(fullPath);
 
-  if (fileModTimes.get(fullPath) !== currentMtime) {
+  if (knownMtime !== currentMtime) {
     fileModTimes.set(fullPath, currentMtime);
-    moduleUrl = `${fullPath}?v=${currentMtime}`;
-    logger.info(`File modified, reloading: ${fullPath}`);
+    // Only log an actual reload (not the very first load) to avoid log spam.
+    if (knownMtime !== undefined) {
+      logger.info(`Reloaded changed route: ${fullPath}`);
+    }
   }
 
-  const module = await import(moduleUrl);
+  // Always import with the current mtime as a cache-busting query so the module
+  // specifier reflects the on-disk version. Importing the bare path would hit
+  // the originally cached module and serve stale output on later requests.
+  const module = await import(`${fullPath}?v=${currentMtime}`);
   const handler = module.default || module.handler;
 
   if (typeof handler !== 'function') {

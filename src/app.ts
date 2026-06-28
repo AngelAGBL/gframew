@@ -53,7 +53,13 @@ const shutdown = async (signal: string) => {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-process.on('uncaughtException', (error) => {
+process.on('uncaughtException', (error: NodeJS.ErrnoException) => {
+  // A client disconnecting mid-write can surface as a benign socket error;
+  // never tear the whole server down for that.
+  if (error.code === 'EPIPE' || error.code === 'ECONNRESET') {
+    logger.warn(`Ignoring benign socket error: ${error.code}`);
+    return;
+  }
   logger.error(`Uncaught exception: ${error.message}`);
   logger.error(error.stack);
   shutdown('UNCAUGHT_EXCEPTION');

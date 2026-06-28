@@ -26,7 +26,14 @@ export function handleTLSSocket(socket: tls.TLSSocket, clientAddress: string): v
   let requestComplete = false;
   let validationFailed = false;
 
-  const cleanup = () => socket.removeAllListeners();
+  // Stop consuming input once the request is parsed, but DO NOT remove the
+  // 'error' handler: a client disconnecting mid-response surfaces as EPIPE/
+  // ECONNRESET on the socket, and without a listener it would crash the process.
+  const stopReading = () => {
+    socket.removeAllListeners('data');
+    socket.removeAllListeners('end');
+    socket.setTimeout(0);
+  };
 
   const rejectRequest = (message: string) => {
     if (validationFailed || requestComplete) return;
@@ -48,7 +55,7 @@ export function handleTLSSocket(socket: tls.TLSSocket, clientAddress: string): v
       logger.debug(`Could not destroy socket: ${error}`);
     }
 
-    cleanup();
+    stopReading();
   };
 
   socket.on('secureConnect', () => {
@@ -75,15 +82,14 @@ export function handleTLSSocket(socket: tls.TLSSocket, clientAddress: string): v
     const requestStr = buffer.toString('utf-8');
     if (!requestStr.includes('\r\n')) return;
 
-    requestComplete = true;
-    cleanup();
-
     const requestLine = requestStr.split('\r\n')[0];
     if (requestLine.length < MIN_VALID_REQUEST_LENGTH) {
       rejectRequest('Invalid URL format');
       return;
     }
 
+    requestComplete = true;
+    stopReading();
     handleRequest(socket, requestLine, clientAddress);
   });
 
@@ -91,10 +97,7 @@ export function handleTLSSocket(socket: tls.TLSSocket, clientAddress: string): v
     if (!requestComplete && !validationFailed && buffer.length > 0) {
       logger.warn(`Client closed connection with incomplete request from ${clientAddress}`);
     }
-    cleanup();
   });
-
-  socket.on('close', cleanup);
 
   socket.setTimeout(REQUEST_TIMEOUT, () => {
     if (!requestComplete && !validationFailed) {
@@ -102,11 +105,16 @@ export function handleTLSSocket(socket: tls.TLSSocket, clientAddress: string): v
     }
   });
 
-  socket.on('error', (error) => {
-    if (!validationFailed && !requestComplete) {
+  socket.on('error', (error: NodeJS.ErrnoException) => {
+    // A client closing the connection mid-response is normal — don't crash.
+    if (error.code === 'EPIPE' || error.code === 'ECONNRESET') {
+      logger.debug(`Client disconnected (${error.code}) from ${clientAddress}`);
+    } else if (!validationFailed && !requestComplete) {
       logger.error(`Socket error from ${clientAddress}: ${error.message}`);
+    } else {
+      logger.debug(`Socket error from ${clientAddress}: ${error.message}`);
     }
-    cleanup();
+    if (!socket.destroyed) socket.destroy();
   });
 }
 
